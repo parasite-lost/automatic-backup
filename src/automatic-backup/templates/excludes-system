@@ -1,0 +1,4 @@
+/home
+/var/cache
+*.pyc
+/root/.cache

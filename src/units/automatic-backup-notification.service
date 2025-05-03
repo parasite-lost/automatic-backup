@@ -1,0 +1,12 @@
+[Unit]
+Description=Notify user about backup status
+After=automatic-backup-notification-varlink.socket
+Requires=automatic-backup-notification-varlink.socket
+
+[Service]
+Type=simple
+ExecStart=@LIBDIR@/automatic-backup/automatic_backup_notification.py
+Sockets=automatic-backup-notification-varlink.socket
+
+[Install]
+WantedBy=graphical-session.target

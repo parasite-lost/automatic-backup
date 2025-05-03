@@ -1,0 +1,11 @@
+# Varlink service
+interface local.automatic-backup.Notification
+
+# Backup start notification
+method Start() -> ()
+
+# Backup running notification
+method Running() -> ()
+
+# Backup stop notification
+method Stop() -> ()

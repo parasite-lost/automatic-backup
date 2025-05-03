@@ -1,0 +1,3 @@
+#!/usr/bin/env sh
+
+@LIBDIR@/automatic-backup/configure.py "$@"
