@@ -118,8 +118,6 @@ class NotificationHandler:
         if self.__count == 0:
             self.__notify_send("Backup finished")
             self.__timer.cancel()
-        else:
-            self.__timer.reset()
         logging.info("Backup finished. Backups still running: %s", self.__count)
 
     def __process_status(self, status: Status):
