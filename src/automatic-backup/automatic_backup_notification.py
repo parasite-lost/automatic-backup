@@ -12,7 +12,7 @@ import threading
 import queue
 
 from pathlib import Path
-from typing import Callable
+from typing import Any, Callable
 
 import varlink
 
@@ -41,6 +41,39 @@ class RestartableTimer:
     def cancel(self):
         """cancel timer"""
         self.__timer.cancel()
+
+
+class PeriodicExecution:
+    """Periodically execute a function once started, until stopped"""
+
+    def __init__(self, interval: float, callback: Callable, call_argument: Any):
+        """Every `interval` seconds execute `callback(call_argument)`. Call
+        `start` to begin and `stop` to terminate periodic execution
+
+        Args:
+            interval (float): period interval in seconds
+            callback (Callable): function to execute
+            call_argument (Any): argument to callback
+        """
+        self.__interval = interval
+        self.__callback = callback
+        self.__call_arg = call_argument
+        self.__stop = threading.Event()
+        self.__thread = threading.Thread(target=self.__continuous_callback)
+
+    def __continuous_callback(self):
+        while not self.__stop.wait(timeout=self.__interval):
+            self.__callback(self.__call_arg)
+
+    def start(self):
+        """start periodic execution"""
+        self.__thread.start()
+
+    def stop(self):
+        """stop periodic execution"""
+        self.__stop.set()
+        self.__thread.join()
+        self.__stop.clear()
 
 
 class Status(enum.Enum):
@@ -78,7 +111,9 @@ def notify_send(title: str, message: str, notfication_id: str = "") -> str:
 class NotificationHandler:
     """Notification handler with timeout"""
 
-    def __init__(self, timeout: int = 10):
+    def __init__(self, timeout: int = 10, notification_interval: int = 10):
+        self.__notification_interval = notification_interval
+        self.__continuous_notification = None
         self.__notification_id = ""
         self.__timer = RestartableTimer(timeout, self.__timed_out)
         self.__count = 0
@@ -88,23 +123,37 @@ class NotificationHandler:
         self.__thread.start()
 
     def __timed_out(self):
-        self.__notify_send("Backup timeout")
+        self.__stop_continuous_notifications("Backup timeout")
         logging.warning("Backup timeout. Lost: %s", self.__count)
         self.__count = 0
 
     def __notify_send(self, message):
         self.__notification_id = notify_send("Backup", message, self.__notification_id)
 
+    def __start_continuos_notifications(self):
+        self.__notify_send("Backup started")
+
+        self.__continuous_notification = PeriodicExecution(
+            self.__notification_interval, self.__notify_send, ("Backup running")
+        )
+        self.__continuous_notification.start()
+
+    def __stop_continuous_notifications(self, reason: str):
+        try:
+            self.__continuous_notification.stop()
+        except AttributeError:
+            pass
+        self.__notify_send(reason)
+
     def __start_backup(self):
         if self.__count == 0:
-            self.__notify_send("Backup started")
+            self.__start_continuos_notifications()
         self.__count += 1
         logging.info("Backup started: %s", self.__count)
         self.__timer.reset()
 
     def __continue_backup(self):
         if self.__count > 0:
-            self.__notify_send("Backup running")
             logging.debug("Backup running: %s", self.__count)
             self.__timer.reset()
         else:
@@ -116,8 +165,8 @@ class NotificationHandler:
             return
         self.__count = max(0, self.__count - 1)
         if self.__count == 0:
-            self.__notify_send("Backup finished")
             self.__timer.cancel()
+            self.__stop_continuous_notifications("Backup finished")
         logging.info("Backup finished. Backups still running: %s", self.__count)
 
     def __process_status(self, status: Status):

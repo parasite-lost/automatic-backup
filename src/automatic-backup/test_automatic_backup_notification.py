@@ -219,7 +219,7 @@ class TestNotificationHandler(unittest.TestCase):
 
             notification.shutdown()
 
-    def test_start_start_running_running_stop_stop(self):
+    def test_running_extends_timer_no_timeout(self):
         with (
             mock.patch("automatic_backup_notification.notify_send") as mock_notify_send,
             mock.patch("logging.info") as mock_logging_info,
@@ -231,15 +231,57 @@ class TestNotificationHandler(unittest.TestCase):
 
             notification.start()
             notification.start()
+            time.sleep(0.05)
             notification.running()
+            time.sleep(0.05)
+            notification.running()
+            time.sleep(0.05)
+            notification.running()
+            time.sleep(0.05)
             notification.running()
             notification.stop()
             notification.stop()
 
-            time.sleep(0.2)
+            time.sleep(0.15)
 
             notify_calls = (
                 mock.call("Backup", "Backup started", ""),
+                mock.call("Backup", "Backup finished", "42"),
+            )
+            mock_notify_send.assert_has_calls(notify_calls)
+            logging_info_calls = (
+                mock.call("Backup started: %s", 1),
+                mock.call("Backup started: %s", 2),
+                mock.call("Backup finished. Backups still running: %s", 1),
+                mock.call("Backup finished. Backups still running: %s", 0),
+            )
+            mock_logging_info.assert_has_calls(logging_info_calls)
+
+            mock_logging_warning.assert_not_called()
+
+            notification.shutdown()
+
+    def test_continuous_notification(self):
+        with (
+            mock.patch("automatic_backup_notification.notify_send") as mock_notify_send,
+            mock.patch("logging.info") as mock_logging_info,
+            mock.patch("logging.warning") as mock_logging_warning,
+        ):
+            notification = NotificationHandler(timeout=10, notification_interval=0.1)
+            self.addCleanup(notification.shutdown)
+            mock_notify_send.return_value = "42"
+
+            notification.start()
+            notification.start()
+            time.sleep(0.35)  # time for three continuous notifications
+            notification.stop()
+            notification.stop()
+
+            time.sleep(0.1)
+
+            notify_calls = (
+                mock.call("Backup", "Backup started", ""),
+                mock.call("Backup", "Backup running", "42"),
                 mock.call("Backup", "Backup running", "42"),
                 mock.call("Backup", "Backup running", "42"),
                 mock.call("Backup", "Backup finished", "42"),
@@ -249,6 +291,52 @@ class TestNotificationHandler(unittest.TestCase):
                 mock.call("Backup started: %s", 1),
                 mock.call("Backup started: %s", 2),
                 mock.call("Backup finished. Backups still running: %s", 1),
+                mock.call("Backup finished. Backups still running: %s", 0),
+            )
+            mock_logging_info.assert_has_calls(logging_info_calls)
+
+            mock_logging_warning.assert_not_called()
+
+            notification.shutdown()
+
+    def test_repeated_phases_of_continuous_notification(self):
+        with (
+            mock.patch("automatic_backup_notification.notify_send") as mock_notify_send,
+            mock.patch("logging.info") as mock_logging_info,
+            mock.patch("logging.warning") as mock_logging_warning,
+        ):
+            notification = NotificationHandler(timeout=10, notification_interval=0.1)
+            self.addCleanup(notification.shutdown)
+            mock_notify_send.return_value = "42"
+
+            notification.start()
+            time.sleep(0.35)  # time for three continuous notifications
+            notification.stop()
+
+            time.sleep(0.1)
+
+            notification.start()
+            time.sleep(0.25)  # time for two continuous notifications
+            notification.stop()
+
+            time.sleep(0.1)
+
+            notify_calls = (
+                mock.call("Backup", "Backup started", ""),
+                mock.call("Backup", "Backup running", "42"),
+                mock.call("Backup", "Backup running", "42"),
+                mock.call("Backup", "Backup running", "42"),
+                mock.call("Backup", "Backup finished", "42"),
+                mock.call("Backup", "Backup started", "42"),
+                mock.call("Backup", "Backup running", "42"),
+                mock.call("Backup", "Backup running", "42"),
+                mock.call("Backup", "Backup finished", "42"),
+            )
+            mock_notify_send.assert_has_calls(notify_calls)
+            logging_info_calls = (
+                mock.call("Backup started: %s", 1),
+                mock.call("Backup finished. Backups still running: %s", 0),
+                mock.call("Backup started: %s", 1),
                 mock.call("Backup finished. Backups still running: %s", 0),
             )
             mock_logging_info.assert_has_calls(logging_info_calls)
