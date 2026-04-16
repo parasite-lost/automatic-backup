@@ -95,19 +95,16 @@ class NotificationHandler:
     def __notify_send(self, message):
         self.__notification_id = notify_send("Backup", message, self.__notification_id)
 
-    def __notify(self, message):
-        self.__notify_send(message)
-
     def __start_backup(self):
         if self.__count == 0:
-            self.__notify("Backup started")
+            self.__notify_send("Backup started")
         self.__count += 1
         logging.info("Backup started: %s", self.__count)
         self.__timer.reset()
 
     def __continue_backup(self):
         if self.__count > 0:
-            self.__notify("Backup running")
+            self.__notify_send("Backup running")
             logging.debug("Backup running: %s", self.__count)
             self.__timer.reset()
         else:
@@ -119,7 +116,7 @@ class NotificationHandler:
             return
         self.__count = max(0, self.__count - 1)
         if self.__count == 0:
-            self.__notify("Backup finished")
+            self.__notify_send("Backup finished")
             self.__timer.cancel()
         else:
             self.__timer.reset()
