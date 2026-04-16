@@ -99,13 +99,13 @@ class TestNotificationHandler(unittest.TestCase):
             mock.patch("logging.info") as mock_logging_info,
             mock.patch("logging.warning") as mock_logging_warning,
         ):
-            notification = NotificationHandler(timeout=0)
+            notification = NotificationHandler(timeout=0.1)
             self.addCleanup(notification.shutdown)
             mock_notify_send.return_value = "42"
 
             notification.start()
 
-            time.sleep(0.01)
+            time.sleep(0.15)
 
             notify_calls = (
                 mock.call("Backup", "Backup started", ""),
@@ -117,7 +117,7 @@ class TestNotificationHandler(unittest.TestCase):
 
             notification.shutdown()
 
-    def test_start_start_timeout(self):
+    def test_start_extends_time_until_timeout(self):
         with (
             mock.patch("automatic_backup_notification.notify_send") as mock_notify_send,
             mock.patch("logging.info") as mock_logging_info,
@@ -128,50 +128,28 @@ class TestNotificationHandler(unittest.TestCase):
             mock_notify_send.return_value = "42"
 
             notification.start()
+            time.sleep(0.05)
             notification.start()
+            time.sleep(0.05)
+            notification.start()
+            time.sleep(0.05)
 
-            time.sleep(0.2)
+            notify_calls = (mock.call("Backup", "Backup started", ""),)
+            mock_notify_send.assert_has_calls(notify_calls)  # not timed out yet
+            mock_notify_send.reset_mock()
 
-            notify_calls = (
-                mock.call("Backup", "Backup started", ""),
-                mock.call("Backup", "Backup timeout", "42"),
-            )
+            time.sleep(0.15)
+
+            notify_calls = (mock.call("Backup", "Backup timeout", "42"),)
             mock_notify_send.assert_has_calls(notify_calls)
             logging_info_calls = (
                 mock.call("Backup started: %s", 1),
                 mock.call("Backup started: %s", 2),
+                mock.call("Backup started: %s", 3),
             )
             mock_logging_info.assert_has_calls(logging_info_calls)
 
-            mock_logging_warning.assert_called_once_with("Backup timeout. Lost: %s", 2)
-
-            notification.shutdown()
-
-    def test_start_running_timeout(self):
-        with (
-            mock.patch("automatic_backup_notification.notify_send") as mock_notify_send,
-            mock.patch("logging.info") as mock_logging_info,
-            mock.patch("logging.warning") as mock_logging_warning,
-        ):
-            notification = NotificationHandler(timeout=0.1)
-            self.addCleanup(notification.shutdown)
-            mock_notify_send.return_value = "42"
-
-            notification.start()
-            notification.running()
-
-            time.sleep(0.2)
-
-            notify_calls = (
-                mock.call("Backup", "Backup started", ""),
-                mock.call("Backup", "Backup running", "42"),
-                mock.call("Backup", "Backup timeout", "42"),
-            )
-            mock_notify_send.assert_has_calls(notify_calls)
-            logging_info_calls = (mock.call("Backup started: %s", 1),)
-            mock_logging_info.assert_has_calls(logging_info_calls)
-
-            mock_logging_warning.assert_called_once_with("Backup timeout. Lost: %s", 1)
+            mock_logging_warning.assert_called_once_with("Backup timeout. Lost: %s", 3)
 
             notification.shutdown()
 
@@ -189,7 +167,7 @@ class TestNotificationHandler(unittest.TestCase):
             notification.start()
             notification.stop()
 
-            time.sleep(0.2)
+            time.sleep(0.15)
 
             notify_calls = (
                 mock.call("Backup", "Backup started", ""),
@@ -207,7 +185,7 @@ class TestNotificationHandler(unittest.TestCase):
 
             notification.shutdown()
 
-    def test_start_start_stop_stop(self):
+    def test_start_start_stop_stop_no_timeout(self):
         with (
             mock.patch("automatic_backup_notification.notify_send") as mock_notify_send,
             mock.patch("logging.info") as mock_logging_info,
@@ -222,7 +200,7 @@ class TestNotificationHandler(unittest.TestCase):
             notification.stop()
             notification.stop()
 
-            time.sleep(0.2)
+            time.sleep(0.15)
 
             notify_calls = (
                 mock.call("Backup", "Backup started", ""),
