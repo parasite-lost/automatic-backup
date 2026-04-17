@@ -169,13 +169,13 @@ exclude_from:
 
 # Exclude directories that contain a file with the given filenames.
 # Defaults to not set.
-# exclude_if_present:
-    # - .nobackup
+exclude_if_present:
+    - .nobackup
 
 # If true, the exclude_if_present filename is included in backups.
 # Defaults to false, meaning that the exclude_if_present filename is
 # omitted from backups.
-# keep_exclude_tags: true
+keep_exclude_tags: true
 
 # Exclude files with the NODUMP flag. Defaults to false. (This option
 # is supported for Borg 1.x only.)
