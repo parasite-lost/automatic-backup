@@ -998,7 +998,8 @@ class TestBackupService(_TestWithFakeDeviceAndFakeUserScope):
 
     def test_service_user(self):
         user_scope = UserScope(self.fake_current_user)
-        fake_path = Path("/bla/foo")
+        fake_path = Path("/bla/\\x20foo")
+        fake_path_escaped = "/bla/\\\\x20foo"
         device = BackupDevice(fake_path, self.repo_suffix)
         credential = SystemdCredential(user_scope, "borgmatic")
         config = BackupConfig(user_scope, device, credential)
@@ -1036,14 +1037,17 @@ class TestBackupService(_TestWithFakeDeviceAndFakeUserScope):
 
             self.assertIn(
                 (
-                    f"Description=Automatic backup to '{fake_path}'\n"
+                    f"Description=Automatic backup to '{fake_path_escaped}'\n"
                     f"Requires={device.mount_unit}\n"
                     f"After={device.mount_unit}\n"
                 ),
                 content,
             )
             self.assertIn(
-                (f'ReadWritePaths="{fake_path}" -%h/.cache/borg -%h/.config/borg -%h/.borgmatic'),
+                (
+                    f'ReadWritePaths="{fake_path_escaped}"'
+                    " -%h/.cache/borg -%h/.config/borg -%h/.borgmatic"
+                ),
                 content,
             )
             self.assertIn(
@@ -1055,7 +1059,7 @@ class TestBackupService(_TestWithFakeDeviceAndFakeUserScope):
                 f'"{Path(__file__).parent}/automatic_backup.py"'
                 f' --config "{config.file_path()}"'
                 f' --uuid "{self.uuid}"'
-                f' --path "{fake_path}"'
+                f' --path "{fake_path_escaped}"'
                 f' --notify "{self.fake_other_user}"'
                 "\n"
             )

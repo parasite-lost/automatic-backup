@@ -894,12 +894,15 @@ class BackupServiceFile(_FileTemplate):
 
     @override
     def _resolve_substitutions(self):
+        # perform escaping for paths to prevent misinterpretations by systemd
+        # note: mount unit must not be escaped (it is already correctly encoded
+        # for systemd), uuid is safe
         self._substitutions = {
-            "@@BACKUP_FOLDER@@": str(self.__device.folder),
+            "@@BACKUP_FOLDER@@": str(self.__device.folder).replace("\\", "\\\\"),
             "@@MOUNT_UNIT@@": self.__device.mount_unit,
             "@@DEVICE_UUID@@": self.__device.uuid,
-            "@@SCRIPT_NAME@@": str(self.__script.file_path()),
-            "@@BACKUP_CONFIG_FILE@@": str(self.__config.file_path()),
+            "@@SCRIPT_NAME@@": str(self.__script.file_path()).replace("\\", "\\\\"),
+            "@@BACKUP_CONFIG_FILE@@": str(self.__config.file_path()).replace("\\", "\\\\"),
         }
         if self.__notify_user:
             self._substitutions["@@NOTIFY_USER@@"] = self.__notify_user
