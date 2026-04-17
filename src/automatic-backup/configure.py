@@ -610,7 +610,7 @@ class BackupDevice:  # pylint: disable=too-many-instance-attributes
                 "--nofsroot",
                 "--output",
                 "SOURCE,TARGET,FSTYPE,UUID",
-                "-T",
+                "--target",
                 f"{path}",
             ],
         ).decode()
@@ -744,7 +744,7 @@ class _ConfigFileTemplate(_FileTemplate):
         pass
 
     @override
-    def file_path(self):
+    def file_path(self) -> Path:
         return self._scope.config_path(self.config_dir, self._file_name)
 
     @override
@@ -844,9 +844,9 @@ class BackupConfig(_ConfigFileTemplate):
     def _resolve_substitutions(self):
         self._substitutions = {
             "@@BORG_REPO_CREDENTIAL@@": self.__credential.name,
-            "@@BACKUP_FOLDER@@": f"{self._folder()}",
-            "@@BACKUP_EXCLUDE_FILE@@": f"{self.exclude.file_path()}",
-            "@@BACKUP_SOURCE_DIR@@": f"{self._scope.home()}",
+            "@@BACKUP_FOLDER@@": str(self._folder()),
+            "@@BACKUP_EXCLUDE_FILE@@": str(self.exclude.file_path()),
+            "@@BACKUP_SOURCE_DIR@@": str(self._scope.home()),
             "@@BACKUP_REPO@@": self._repo(),
         }
 
@@ -895,11 +895,11 @@ class BackupServiceFile(_FileTemplate):
     @override
     def _resolve_substitutions(self):
         self._substitutions = {
-            "@@BACKUP_FOLDER@@": f"{self.__device.folder}",
-            "@@MOUNT_UNIT@@": f"{self.__device.mount_unit}",
-            "@@DEVICE_UUID@@": f"{self.__device.uuid}",
-            "@@SCRIPT_NAME@@": f"{self.__script.file_path()}",
-            "@@BACKUP_CONFIG_FILE@@": f"{self.__config.file_path()}",
+            "@@BACKUP_FOLDER@@": str(self.__device.folder),
+            "@@MOUNT_UNIT@@": self.__device.mount_unit,
+            "@@DEVICE_UUID@@": self.__device.uuid,
+            "@@SCRIPT_NAME@@": str(self.__script.file_path()),
+            "@@BACKUP_CONFIG_FILE@@": str(self.__config.file_path()),
         }
         if self.__notify_user:
             self._substitutions["@@NOTIFY_USER@@"] = self.__notify_user
