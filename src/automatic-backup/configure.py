@@ -587,7 +587,7 @@ class BackupDevice:  # pylint: disable=too-many-instance-attributes
         path: backup device mount path (needs to be currently mounted)
         """
         try:
-            self.__folder: Path = path
+            self.__folder: Path = path.resolve()
             findmnt_data = self._findmnt(path)
             parsed_data = json.loads(findmnt_data)
             file_system = parsed_data["filesystems"][0]
@@ -661,6 +661,7 @@ class BackupDevice:  # pylint: disable=too-many-instance-attributes
             "Backup target:\n"
             f"  - Device: {self.device}\n"
             f"  - Mount point: {self.mount_point}\n"
+            f"  - Backup path: {self.folder}\n"
             f"  - Filesystem: {self.filesystem_type}\n"
             f"  - UUID: {self.uuid}\n"
             f"  - Mount target: {self.systemd_escaped}\n"

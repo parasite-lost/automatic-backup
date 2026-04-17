@@ -698,6 +698,7 @@ class _TestWithFakeDevice(_TestConfigureBase):  # pylint: disable=too-many-publi
     uuid = "ab501007-dead-beef-1337-422342234223"
     device = "/dev/mapper/luks-01234567-89ab-cdef-0123-456789abcdef"
     mount_point = Path("/run/media/test/target")
+    folder = mount_point / "backup/directory"
 
     def __mock_findmnt_return_value(self, fstype: str) -> str:
         return f"""\
@@ -731,10 +732,15 @@ class TestBackupDevice(_TestWithFakeDevice):
     @override
     def setUp(self):
         super().setUp()
-        self.backup_device = BackupDevice(Path("bla/foo"), self.repo_suffix)
+        self.backup_device = BackupDevice(self.folder, self.repo_suffix)
 
     def test_folder(self):
-        self.assertEqual(self.backup_device.folder, Path("bla/foo"))
+        self.assertEqual(self.backup_device.folder, self.folder)
+
+    def test_folder_resolve(self):
+        unresolved_folder = Path("/test/this/../../backup/directory")
+        backup_device = BackupDevice(unresolved_folder, self.repo_suffix)
+        self.assertEqual(backup_device.folder, Path("/backup/directory"))
 
     def test_repo_suffix(self):
         self.assertEqual(self.backup_device.repo_suffix, self.repo_suffix)
@@ -764,6 +770,7 @@ class TestBackupDevice(_TestWithFakeDevice):
 Backup target:
   - Device: {self.device}
   - Mount point: {self.mount_point}
+  - Backup path: {self.folder}
   - Filesystem: {self.fs_type}
   - UUID: {self.uuid}
   - Mount target: {self.target}
