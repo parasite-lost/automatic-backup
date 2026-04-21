@@ -827,11 +827,6 @@ default_actions: true
       # for all states.
       # states:
           # - finish
-commands:
-  - before: repository
-    run:
-      - findmnt @@BACKUP_FOLDER@@ > /dev/null || exit 75
-        # 75: magic exit code for temporary failure
 
 # Support for the "borgmatic bootstrap" action, used to extract
 # borgmatic configuration files from a backup archive.

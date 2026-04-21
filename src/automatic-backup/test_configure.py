@@ -905,15 +905,6 @@ class TestBackupConfig(_TestWithFakeDeviceAndFakeUserScope):
 
             self.assertIn(
                 (
-                    f"commands:\n"
-                    f"  - before: repository\n"
-                    f"    run:\n"
-                    f"      - findmnt {backup_device.folder} > /dev/null || exit 75"
-                ),
-                content,
-            )
-            self.assertIn(
-                (
                     f"repositories:\n"
                     f"    # The local path or Borg URL of the repository.\n"
                     f"    - path: {fake_path}/{scope.scope()}-{fake_repo}\n"
@@ -962,15 +953,6 @@ class TestBackupConfig(_TestWithFakeDeviceAndFakeUserScope):
 
             self.assertNotIn("@@", content)
 
-            self.assertIn(
-                (
-                    f"commands:\n"
-                    f"  - before: repository\n"
-                    f"    run:\n"
-                    f"      - findmnt {backup_device.folder} > /dev/null || exit 75"
-                ),
-                content,
-            )
             self.assertIn(
                 (
                     f"repositories:\n"

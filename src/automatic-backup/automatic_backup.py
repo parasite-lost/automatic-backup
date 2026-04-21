@@ -161,7 +161,17 @@ class BackupRunnerBorgmatic:
             return True
         try:
             actual_uuid = subprocess.check_output(
-                ["findmnt", "-vrno", "UUID", "-T", self.__target_path], text=True
+                [
+                    "findmnt",
+                    "--nofsroot",
+                    "--raw",
+                    "--noheadings",
+                    "--output",
+                    "UUID",
+                    "--target",
+                    self.__target_path,
+                ],
+                text=True,
             )
             if actual_uuid.strip() != self.__uuid:
                 logging.error("UUID mismatch. Actual: %s, expected: %s.", actual_uuid, self.__uuid)
