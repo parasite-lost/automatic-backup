@@ -738,9 +738,9 @@ class TestBackupDevice(_TestWithFakeDevice):
         self.assertEqual(self.backup_device.folder, self.folder)
 
     def test_folder_resolve(self):
-        unresolved_folder = Path("/test/this/../../backup/directory")
+        unresolved_folder = self.mount_point / "test/this/../../backup/directory"
         backup_device = BackupDevice(unresolved_folder, self.repo_suffix)
-        self.assertEqual(backup_device.folder, Path("/backup/directory"))
+        self.assertEqual(backup_device.folder, self.mount_point / "backup/directory")
 
     def test_repo_suffix(self):
         self.assertEqual(self.backup_device.repo_suffix, self.repo_suffix)
@@ -792,7 +792,7 @@ class _TestWithFakeDeviceAndFakeUserScope(
 
 class TestExt4UdevRule(_TestWithFakeDeviceAndFakeUserScope):
     def test_rule_content(self):
-        backup_device = BackupDevice(Path("/what/ever/man"), "suffix")
+        backup_device = BackupDevice(self.mount_point / "fake/backup", "suffix")
         udev_rule = Ext4UdevRule(backup_device)
 
         udev_rule_content = (
@@ -817,7 +817,7 @@ class TestExt4UdevRule(_TestWithFakeDeviceAndFakeUserScope):
 class TestBackupExcludes(_TestWithFakeDeviceAndFakeUserScope):
     def test_exclude_user(self):
         user_scope = UserScope(self.fake_current_user)
-        backup_device = BackupDevice(Path("/fake/path"), "fake-repo")
+        backup_device = BackupDevice(self.mount_point / "fake/path", "fake-repo")
         exclude = BackupExcludeUserFile(user_scope, backup_device)
         with (
             mock.patch("configure.write_file") as mock_write_file,
@@ -844,7 +844,7 @@ class TestBackupExcludes(_TestWithFakeDeviceAndFakeUserScope):
             self.assertIn(f"{self.fake_current_home}/.cache", content)
 
     def test_exclude_system(self):
-        backup_device = BackupDevice(Path("/fake/path"), "fake-repo")
+        backup_device = BackupDevice(self.mount_point / "fake/path", "fake-repo")
         exclude = BackupExcludeSystemFile(backup_device)
         with (
             mock.patch("configure.write_file") as mock_write_file,
@@ -873,7 +873,7 @@ class TestBackupExcludes(_TestWithFakeDeviceAndFakeUserScope):
 class TestBackupConfig(_TestWithFakeDeviceAndFakeUserScope):
     def test_config_user(self):
         scope = UserScope(self.fake_current_user)
-        fake_path = Path("/fake/path")
+        fake_path = self.mount_point / "fake/path"
         fake_repo = "fake-repo"
         backup_device = BackupDevice(fake_path, fake_repo)
         credential = SystemdCredential(scope, "borgmatic")
@@ -920,11 +920,13 @@ class TestBackupConfig(_TestWithFakeDeviceAndFakeUserScope):
             self.assertIn(
                 f'encryption_passphrase: "{{credential systemd {credential.name}}}"', content
             )
-        self.assertEqual(config.repo_path(), Path("/fake/path/user-fakecurrentuser-fake-repo"))
+        self.assertEqual(
+            config.repo_path(), self.mount_point / "fake/path/user-fakecurrentuser-fake-repo"
+        )
 
     def test_config_system(self):
         scope = SystemScope()
-        fake_path = Path("/fake/path")
+        fake_path = self.mount_point / "fake/path"
         fake_repo = "fake-repo"
         backup_device = BackupDevice(fake_path, fake_repo)
         credential = SystemdCredential(scope, "borgmatic")
@@ -970,7 +972,7 @@ class TestBackupConfig(_TestWithFakeDeviceAndFakeUserScope):
             self.assertIn(
                 f'encryption_passphrase: "{{credential systemd {credential.name}}}"', content
             )
-        self.assertEqual(config.repo_path(), Path("/fake/path/system-fake-repo"))
+        self.assertEqual(config.repo_path(), self.mount_point / "fake/path/system-fake-repo")
 
 
 class TestBackupService(_TestWithFakeDeviceAndFakeUserScope):
@@ -980,8 +982,8 @@ class TestBackupService(_TestWithFakeDeviceAndFakeUserScope):
 
     def test_service_user(self):
         user_scope = UserScope(self.fake_current_user)
-        fake_path = Path("/bla/\\x20foo")
-        fake_path_escaped = "/bla/\\\\x20foo"
+        fake_path = self.mount_point / "bla/\\x20foo"
+        fake_path_escaped = self.mount_point / "bla/\\\\x20foo"
         device = BackupDevice(fake_path, self.repo_suffix)
         credential = SystemdCredential(user_scope, "borgmatic")
         config = BackupConfig(user_scope, device, credential)
@@ -1050,7 +1052,7 @@ class TestBackupService(_TestWithFakeDeviceAndFakeUserScope):
 
     def test_service_system(self):
         system_scope = SystemScope()
-        fake_path = Path("/bla/foo")
+        fake_path = self.mount_point / "bla/foo"
         device = BackupDevice(fake_path, self.repo_suffix)
         credential = SystemdCredential(system_scope, "borgmatic")
         config = BackupConfig(system_scope, device, credential)
@@ -1124,7 +1126,7 @@ class TestBackupCredentials(_TestWithFakeDeviceAndFakeUserScope):
     def test_credential_current_user(self):
         user_scope = UserScope(self.fake_current_user)
         credential = SystemdCredential(user_scope, "borgmatic")
-        device = BackupDevice(Path("/fake/path"), "fake-repo")
+        device = BackupDevice(self.mount_point / "fake/path", "fake-repo")
         config = BackupConfig(user_scope, device, credential)
         script = BackupScript()
         service = BackupServiceFile(scope=user_scope, device=device, config=config, script=script)
@@ -1163,7 +1165,7 @@ class TestBackupCredentials(_TestWithFakeDeviceAndFakeUserScope):
     def test_credential_other_user(self):
         user_scope = UserScope(self.fake_other_user)
         credential = SystemdCredential(user_scope, "borgmatic")
-        device = BackupDevice(Path("/fake/path"), "fake-repo")
+        device = BackupDevice(self.mount_point / "fake/path", "fake-repo")
         config = BackupConfig(user_scope, device, credential)
         script = BackupScript()
         service = BackupServiceFile(scope=user_scope, device=device, config=config, script=script)
@@ -1205,7 +1207,7 @@ class TestBackupCredentials(_TestWithFakeDeviceAndFakeUserScope):
     def test_credential_system(self):
         system_scope = SystemScope()
         credential = SystemdCredential(system_scope, "borgmatic")
-        device = BackupDevice(Path("/fake/path"), "fake-repo")
+        device = BackupDevice(self.mount_point / "fake/path", "fake-repo")
         config = BackupConfig(system_scope, device, credential)
         script = BackupScript()
         service = BackupServiceFile(scope=system_scope, device=device, config=config, script=script)
@@ -1252,7 +1254,7 @@ class TestBackupServiceSetup(_TestWithFakeDeviceAndFakeUserScope):
 
     def test_export_key_current_user(self):
         current_scope = UserScope(self.fake_current_user)
-        device = BackupDevice(Path("/fake/path"), "fake-repo")
+        device = BackupDevice(self.mount_point / "fake/path", "fake-repo")
         current_backup_service = BackupServiceSetup(current_scope, device)
         credential = SystemdCredential(current_scope, "borgmatic")
         with mock.patch("subprocess.check_output") as mock_check_output:
@@ -1293,7 +1295,7 @@ class TestBackupServiceSetup(_TestWithFakeDeviceAndFakeUserScope):
     def test_export_key_other_user(self):
         other_scope = UserScope(self.fake_other_user)
         repo_name = "fake-repo"
-        device = BackupDevice(Path("/fake/path"), repo_name)
+        device = BackupDevice(self.mount_point / "fake/path", "fake-repo")
         other_backup_service = BackupServiceSetup(other_scope, device)
         credential = SystemdCredential(other_scope, "borgmatic")
         with (
@@ -1345,7 +1347,7 @@ class TestBackupServiceSetup(_TestWithFakeDeviceAndFakeUserScope):
     def test_export_key_system(self):
         system_scope = SystemScope()
         repo_name = "fake-repo"
-        device = BackupDevice(Path("/fake/path"), repo_name)
+        device = BackupDevice(self.mount_point / "fake/path", "fake-repo")
         current_backup_service = BackupServiceSetup(system_scope, device)
         credential = SystemdCredential(system_scope, "borgmatic")
         with (
@@ -1390,7 +1392,7 @@ class TestBackupServiceSetup(_TestWithFakeDeviceAndFakeUserScope):
     # pylint: disable=too-many-locals
     def test_setup_current_user(self):
         current_scope = UserScope(self.fake_current_user)
-        device = BackupDevice(Path("/fake/path"), "fake-repo")
+        device = BackupDevice(self.mount_point / "fake/path", "fake-repo")
 
         with (
             TemporaryDirectory() as tmp_dir,
@@ -1502,7 +1504,7 @@ class TestBackupServiceSetup(_TestWithFakeDeviceAndFakeUserScope):
     # pylint: disable=too-many-locals
     def test_setup_other_user(self):
         other_scope = UserScope(self.fake_other_user)
-        device = BackupDevice(Path("/fake/path"), "fake-repo")
+        device = BackupDevice(self.mount_point / "fake/path", "fake-repo")
 
         with (
             TemporaryDirectory() as tmp_dir,
@@ -1621,7 +1623,7 @@ class TestBackupServiceSetup(_TestWithFakeDeviceAndFakeUserScope):
 
     def test_setup_system(self):
         system_scope = SystemScope()
-        device = BackupDevice(Path("/fake/path"), "fake-repo")
+        device = BackupDevice(self.mount_point / "fake/path", "fake-repo")
 
         with (
             TemporaryDirectory() as tmp_dir,

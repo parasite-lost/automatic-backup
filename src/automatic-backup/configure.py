@@ -587,12 +587,13 @@ class BackupDevice:  # pylint: disable=too-many-instance-attributes
         path: backup device mount path (needs to be currently mounted)
         """
         try:
-            self.__folder: Path = path.resolve()
-            findmnt_data = self._findmnt(path)
+            resolved_path = path.resolve()
+            findmnt_data = self._findmnt(resolved_path)
             parsed_data = json.loads(findmnt_data)
             file_system = parsed_data["filesystems"][0]
             self.__device: str = file_system["source"]
             self.__mount_point: Path = Path(file_system["target"])
+            self.__subfolder: Path = resolved_path.relative_to(self.__mount_point)
             self.__filesystem_type: str = file_system["fstype"]
             self.__uuid: str = file_system["uuid"]
             self.__systemd_escaped: str = systemd_escape(file_system["target"])
@@ -618,7 +619,7 @@ class BackupDevice:  # pylint: disable=too-many-instance-attributes
     @property
     def folder(self) -> Path:
         """backup folder (where to place backups)"""
-        return self.__folder
+        return self.__mount_point / self.__subfolder
 
     @property
     def repo_suffix(self) -> str:
