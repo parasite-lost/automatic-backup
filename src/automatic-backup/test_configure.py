@@ -18,12 +18,13 @@ from configure import (
     BackupExcludeUserFile,
     BackupExcludeSystemFile,
     BackupConfig,
-    BackupDevice,
+    BackupLocation,
     BackupScript,
     BackupServiceFile,
     BackupServiceCredentialFile,
     BackupServiceSetup,
     Ext4UdevRule,
+    MountData,
     SystemdCredential,
     SystemScope,
     UserScope,
@@ -693,34 +694,21 @@ class TestSystemdCredential(_TestWithFakeUserScope):
         self.assertEqual(credential.encrypted_plain, self.plain_encrypted_credential_oneline)
 
 
-class _TestWithFakeDevice(_TestConfigureBase):  # pylint: disable=too-many-public-methods
-    fs_type = "ext4"
+class _TestWithFakeLocation(_TestConfigureBase):  # pylint: disable=too-many-public-methods
     uuid = "ab501007-dead-beef-1337-422342234223"
-    device = "/dev/mapper/luks-01234567-89ab-cdef-0123-456789abcdef"
+    device = Path("/dev/mapper/luks-01234567-89ab-cdef-0123-456789abcdef")
     mount_point = Path("/run/media/test/target")
     folder = mount_point / "backup/directory"
-
-    def __mock_findmnt_return_value(self, fstype: str) -> str:
-        return f"""\
-{{
-   "filesystems": [
-      {{
-         "source": "{self.device}",
-         "target": "{self.mount_point}",
-         "fstype": "{fstype}",
-         "uuid": "{self.uuid}"
-      }}
-   ]
-}}\
-"""
-
     target = "run-media-test-target"
     repo_suffix = "testing"
 
+    def __mock_findmnt_return_value(self) -> str:
+        return MountData(device=self.device, mount_point=self.mount_point, uuid=self.uuid)
+
     def _do_setup(self):
-        self.patch_findmnt = mock.patch("configure.BackupDevice._findmnt")
+        self.patch_findmnt = mock.patch("configure.get_mount_data")
         self.mock_findmnt = self.patch_findmnt.start()
-        self.mock_findmnt.return_value = self.__mock_findmnt_return_value(self.fs_type)
+        self.mock_findmnt.return_value = self.__mock_findmnt_return_value()
 
     @override
     def setUp(self):
@@ -728,72 +716,67 @@ class _TestWithFakeDevice(_TestConfigureBase):  # pylint: disable=too-many-publi
         super().setUp()
 
 
-class TestBackupDevice(_TestWithFakeDevice):
+class TestBackupLocation(_TestWithFakeLocation):
     @override
     def setUp(self):
         super().setUp()
-        self.backup_device = BackupDevice(self.folder, self.repo_suffix)
+        self.backup_location = BackupLocation(self.folder, self.repo_suffix)
 
     def test_folder(self):
-        self.assertEqual(self.backup_device.folder, self.folder)
+        self.assertEqual(self.backup_location.folder, self.folder)
 
     def test_folder_resolve(self):
         unresolved_folder = self.mount_point / "test/this/../../backup/directory"
-        backup_device = BackupDevice(unresolved_folder, self.repo_suffix)
-        self.assertEqual(backup_device.folder, self.mount_point / "backup/directory")
+        backup_location = BackupLocation(unresolved_folder, self.repo_suffix)
+        self.assertEqual(backup_location.folder, self.mount_point / "backup/directory")
 
     def test_repo_suffix(self):
-        self.assertEqual(self.backup_device.repo_suffix, self.repo_suffix)
+        self.assertEqual(self.backup_location.repo_suffix, self.repo_suffix)
 
     def test_device(self):
-        self.assertEqual(self.backup_device.device, self.device)
+        self.assertEqual(self.backup_location.device, self.device)
 
     def test_mount_point(self):
-        self.assertEqual(self.backup_device.mount_point, self.mount_point)
-
-    def test_filesystem_type(self):
-        self.assertEqual(self.backup_device.filesystem_type, self.fs_type)
+        self.assertEqual(self.backup_location.mount_point, self.mount_point)
 
     def test_uuid(self):
-        self.assertEqual(self.backup_device.uuid, self.uuid)
+        self.assertEqual(self.backup_location.uuid, self.uuid)
 
     def test_systemd_escaped(self):
-        self.assertEqual(self.backup_device.systemd_escaped, self.target)
+        self.assertEqual(self.backup_location.systemd_escaped, self.target)
 
     def test_mount_unit(self):
-        self.assertEqual(self.backup_device.mount_unit, f"{self.target}.mount")
+        self.assertEqual(self.backup_location.mount_unit, f"{self.target}.mount")
 
     def test_str(self):
         self.assertEqual(
-            str(self.backup_device),
+            str(self.backup_location),
             f"""\
-Backup target:
-  - Device: {self.device}
-  - Mount point: {self.mount_point}
+Backup location:
   - Backup path: {self.folder}
-  - Filesystem: {self.fs_type}
-  - UUID: {self.uuid}
-  - Mount target: {self.target}
-  - Mount unit: {self.target}.mount
   - Repo suffix: {self.repo_suffix}
+  - Device: {self.device}
+  - UUID: {self.uuid}
+  - Mount point: {self.mount_point}
+  - Mount target: {self.target}
 """,
         )
 
 
-class _TestWithFakeDeviceAndFakeUserScope(
-    _TestWithFakeDevice, _TestWithFakeUserScope, _TestConfigureBase
+class _TestWithFakeLocationAndFakeUserScope(
+    _TestWithFakeLocation, _TestWithFakeUserScope, _TestConfigureBase
 ):
     @override
     def setUp(self):
-        _TestWithFakeDevice._do_setup(self)
+        _TestWithFakeLocation._do_setup(self)
         _TestWithFakeUserScope._do_setup(self)
         _TestConfigureBase.setUp(self)
 
 
-class TestExt4UdevRule(_TestWithFakeDeviceAndFakeUserScope):
+class TestExt4UdevRule(_TestWithFakeLocationAndFakeUserScope):
     def test_rule_content(self):
-        backup_device = BackupDevice(self.mount_point / "fake/backup", "suffix")
-        udev_rule = Ext4UdevRule(backup_device)
+        backup_location = BackupLocation(self.mount_point / "fake/backup", "suffix")
+        udev_rule = Ext4UdevRule(backup_location)
 
         udev_rule_content = (
             f'SUBSYSTEM=="block", ENV{{ID_FS_UUID}}=="{self.uuid}" ENV{{UDISKS_AUTO}}="1"\n'
@@ -814,11 +797,11 @@ class TestExt4UdevRule(_TestWithFakeDeviceAndFakeUserScope):
             )
 
 
-class TestBackupExcludes(_TestWithFakeDeviceAndFakeUserScope):
+class TestBackupExcludes(_TestWithFakeLocationAndFakeUserScope):
     def test_exclude_user(self):
         user_scope = UserScope(self.fake_current_user)
-        backup_device = BackupDevice(self.mount_point / "fake/path", "fake-repo")
-        exclude = BackupExcludeUserFile(user_scope, backup_device)
+        backup_location = BackupLocation(self.mount_point / "fake/path", "fake-repo")
+        exclude = BackupExcludeUserFile(user_scope, backup_location)
         with (
             mock.patch("configure.write_file") as mock_write_file,
             mock.patch("configure.create_dir"),
@@ -836,7 +819,7 @@ class TestBackupExcludes(_TestWithFakeDeviceAndFakeUserScope):
                 self.fake_current_home
                 / ".config"
                 / "borgmatic"
-                / f"excludes-user-{backup_device.systemd_escaped}",
+                / f"excludes-user-{backup_location.systemd_escaped}",
             )
             self.assertEqual(uid, self.fake_current_uid)
             self.assertEqual(gid, self.fake_current_gid)
@@ -844,8 +827,8 @@ class TestBackupExcludes(_TestWithFakeDeviceAndFakeUserScope):
             self.assertIn(f"{self.fake_current_home}/.cache", content)
 
     def test_exclude_system(self):
-        backup_device = BackupDevice(self.mount_point / "fake/path", "fake-repo")
-        exclude = BackupExcludeSystemFile(backup_device)
+        backup_location = BackupLocation(self.mount_point / "fake/path", "fake-repo")
+        exclude = BackupExcludeSystemFile(backup_location)
         with (
             mock.patch("configure.write_file") as mock_write_file,
             mock.patch("configure.create_dir"),
@@ -860,7 +843,7 @@ class TestBackupExcludes(_TestWithFakeDeviceAndFakeUserScope):
 
             self.assertEqual(
                 path,
-                Path("/etc/borgmatic") / f"excludes-system-{backup_device.systemd_escaped}",
+                Path("/etc/borgmatic") / f"excludes-system-{backup_location.systemd_escaped}",
             )
             self.assertEqual(uid, 0)
             self.assertEqual(gid, 0)
@@ -870,14 +853,14 @@ class TestBackupExcludes(_TestWithFakeDeviceAndFakeUserScope):
             self.assertIn("/var/cache", content)
 
 
-class TestBackupConfig(_TestWithFakeDeviceAndFakeUserScope):
+class TestBackupConfig(_TestWithFakeLocationAndFakeUserScope):
     def test_config_user(self):
         scope = UserScope(self.fake_current_user)
         fake_path = self.mount_point / "fake/path"
         fake_repo = "fake-repo"
-        backup_device = BackupDevice(fake_path, fake_repo)
+        backup_location = BackupLocation(fake_path, fake_repo)
         credential = SystemdCredential(scope, "borgmatic")
-        config = BackupConfig(scope, backup_device, credential)
+        config = BackupConfig(scope, backup_location, credential)
         with (
             mock.patch("configure.write_file") as mock_write_file,
             mock.patch("configure.create_dir"),
@@ -896,7 +879,7 @@ class TestBackupConfig(_TestWithFakeDeviceAndFakeUserScope):
                 self.fake_current_home
                 / ".config"
                 / "borgmatic"
-                / f"borgmatic-config-{backup_device.systemd_escaped}.yaml",
+                / f"borgmatic-config-{backup_location.systemd_escaped}.yaml",
             )
             self.assertEqual(uid, self.fake_current_uid)
             self.assertEqual(gid, self.fake_current_gid)
@@ -928,9 +911,9 @@ class TestBackupConfig(_TestWithFakeDeviceAndFakeUserScope):
         scope = SystemScope()
         fake_path = self.mount_point / "fake/path"
         fake_repo = "fake-repo"
-        backup_device = BackupDevice(fake_path, fake_repo)
+        backup_location = BackupLocation(fake_path, fake_repo)
         credential = SystemdCredential(scope, "borgmatic")
-        config = BackupConfig(scope, backup_device, credential)
+        config = BackupConfig(scope, backup_location, credential)
         with (
             mock.patch("configure.write_file") as mock_write_file,
             mock.patch("configure.create_dir"),
@@ -948,7 +931,7 @@ class TestBackupConfig(_TestWithFakeDeviceAndFakeUserScope):
                 path,
                 Path("/etc")
                 / "borgmatic"
-                / f"borgmatic-config-{backup_device.systemd_escaped}.yaml",
+                / f"borgmatic-config-{backup_location.systemd_escaped}.yaml",
             )
             self.assertEqual(uid, 0)
             self.assertEqual(gid, 0)
@@ -975,7 +958,7 @@ class TestBackupConfig(_TestWithFakeDeviceAndFakeUserScope):
         self.assertEqual(config.repo_path(), self.mount_point / "fake/path/system-fake-repo")
 
 
-class TestBackupService(_TestWithFakeDeviceAndFakeUserScope):
+class TestBackupService(_TestWithFakeLocationAndFakeUserScope):
     systemd_inhibit = (
         'systemd-inhibit --what=idle:sleep:shutdown --who="%N" --why="automatic backup"'
     )
@@ -984,12 +967,12 @@ class TestBackupService(_TestWithFakeDeviceAndFakeUserScope):
         user_scope = UserScope(self.fake_current_user)
         fake_path = self.mount_point / "bla/\\x20foo"
         fake_path_escaped = self.mount_point / "bla/\\\\x20foo"
-        device = BackupDevice(fake_path, self.repo_suffix)
+        location = BackupLocation(fake_path, self.repo_suffix)
         credential = SystemdCredential(user_scope, "borgmatic")
-        config = BackupConfig(user_scope, device, credential)
+        config = BackupConfig(user_scope, location, credential)
         service = BackupServiceFile(
             scope=user_scope,
-            device=device,
+            location=location,
             config=config,
             script=BackupScript(),
             notify_user=self.fake_other_user,
@@ -1012,7 +995,7 @@ class TestBackupService(_TestWithFakeDeviceAndFakeUserScope):
                 / ".config"
                 / "systemd"
                 / "user"
-                / f"automatic-backup-{device.systemd_escaped}.service",
+                / f"automatic-backup-{location.systemd_escaped}.service",
             )
             self.assertEqual(uid, self.fake_current_uid)
             self.assertEqual(gid, self.fake_current_gid)
@@ -1022,8 +1005,8 @@ class TestBackupService(_TestWithFakeDeviceAndFakeUserScope):
             self.assertIn(
                 (
                     f"Description=Automatic backup to '{fake_path_escaped}'\n"
-                    f"Requires={device.mount_unit}\n"
-                    f"After={device.mount_unit}\n"
+                    f"Requires={location.mount_unit}\n"
+                    f"After={location.mount_unit}\n"
                 ),
                 content,
             )
@@ -1035,7 +1018,7 @@ class TestBackupService(_TestWithFakeDeviceAndFakeUserScope):
                 content,
             )
             self.assertIn(
-                (f"[Install]\n" f"WantedBy={device.mount_unit}\n"),
+                (f"[Install]\n" f"WantedBy={location.mount_unit}\n"),
                 content,
             )
             self.assertIn(self.systemd_inhibit, content)
@@ -1053,12 +1036,12 @@ class TestBackupService(_TestWithFakeDeviceAndFakeUserScope):
     def test_service_system(self):
         system_scope = SystemScope()
         fake_path = self.mount_point / "bla/foo"
-        device = BackupDevice(fake_path, self.repo_suffix)
+        location = BackupLocation(fake_path, self.repo_suffix)
         credential = SystemdCredential(system_scope, "borgmatic")
-        config = BackupConfig(system_scope, device, credential)
+        config = BackupConfig(system_scope, location, credential)
         service = BackupServiceFile(
             scope=system_scope,
-            device=device,
+            location=location,
             config=config,
             script=BackupScript(),
             notify_user=self.fake_other_user,
@@ -1077,7 +1060,8 @@ class TestBackupService(_TestWithFakeDeviceAndFakeUserScope):
 
             self.assertEqual(
                 path,
-                Path("/etc/systemd/system") / f"automatic-backup-{device.systemd_escaped}.service",
+                Path("/etc/systemd/system")
+                / f"automatic-backup-{location.systemd_escaped}.service",
             )
             self.assertEqual(uid, 0)
             self.assertEqual(gid, 0)
@@ -1087,8 +1071,8 @@ class TestBackupService(_TestWithFakeDeviceAndFakeUserScope):
             self.assertIn(
                 (
                     f"Description=Automatic backup to '{fake_path}'\n"
-                    f"Requires={device.mount_unit}\n"
-                    f"After={device.mount_unit}\n"
+                    f"Requires={location.mount_unit}\n"
+                    f"After={location.mount_unit}\n"
                 ),
                 content,
             )
@@ -1097,14 +1081,14 @@ class TestBackupService(_TestWithFakeDeviceAndFakeUserScope):
                 content,
             )
             self.assertIn(
-                (f"[Install]\n" f"WantedBy={device.mount_unit}\n"),
+                (f"[Install]\n" f"WantedBy={location.mount_unit}\n"),
                 content,
             )
             self.assertIn(self.systemd_inhibit, content)
             main_command = (
                 f'"{Path(__file__).parent}/automatic_backup.py"'
                 f' --config "{config.file_path()}"'
-                f' --uuid "{device.uuid}"'
+                f' --uuid "{location.uuid}"'
                 f' --path "{fake_path}"'
                 f' --notify "{self.fake_other_user}"'
                 "\n"
@@ -1113,7 +1097,7 @@ class TestBackupService(_TestWithFakeDeviceAndFakeUserScope):
             self.assertIn(exec_start, content)
 
 
-class TestBackupCredentials(_TestWithFakeDeviceAndFakeUserScope):
+class TestBackupCredentials(_TestWithFakeLocationAndFakeUserScope):
     credential_text = (
         "SetCredentialEncrypted=borgmatic: \\\n"
         "        p4ptHsi4/HNIT+b4nZ2IwKgtCoHcb7NAuhMkvKMA0yrGuJ+IGMUKr7PACjNGd+ELMjkCJ \\\n"
@@ -1126,10 +1110,12 @@ class TestBackupCredentials(_TestWithFakeDeviceAndFakeUserScope):
     def test_credential_current_user(self):
         user_scope = UserScope(self.fake_current_user)
         credential = SystemdCredential(user_scope, "borgmatic")
-        device = BackupDevice(self.mount_point / "fake/path", "fake-repo")
-        config = BackupConfig(user_scope, device, credential)
+        location = BackupLocation(self.mount_point / "fake/path", "fake-repo")
+        config = BackupConfig(user_scope, location, credential)
         script = BackupScript()
-        service = BackupServiceFile(scope=user_scope, device=device, config=config, script=script)
+        service = BackupServiceFile(
+            scope=user_scope, location=location, config=config, script=script
+        )
         credential_dropin = BackupServiceCredentialFile(user_scope, service, credential)
 
         with mock.patch("subprocess.check_output") as mock_check_output:
@@ -1152,7 +1138,7 @@ class TestBackupCredentials(_TestWithFakeDeviceAndFakeUserScope):
                 path,
                 self.fake_current_home
                 / ".config/systemd/user"
-                / f"automatic-backup-{device.systemd_escaped}.service.d"
+                / f"automatic-backup-{location.systemd_escaped}.service.d"
                 / "credential.conf",
             )
             self.assertEqual(uid, self.fake_current_uid)
@@ -1165,10 +1151,12 @@ class TestBackupCredentials(_TestWithFakeDeviceAndFakeUserScope):
     def test_credential_other_user(self):
         user_scope = UserScope(self.fake_other_user)
         credential = SystemdCredential(user_scope, "borgmatic")
-        device = BackupDevice(self.mount_point / "fake/path", "fake-repo")
-        config = BackupConfig(user_scope, device, credential)
+        location = BackupLocation(self.mount_point / "fake/path", "fake-repo")
+        config = BackupConfig(user_scope, location, credential)
         script = BackupScript()
-        service = BackupServiceFile(scope=user_scope, device=device, config=config, script=script)
+        service = BackupServiceFile(
+            scope=user_scope, location=location, config=config, script=script
+        )
         credential_dropin = BackupServiceCredentialFile(user_scope, service, credential)
 
         with (
@@ -1194,7 +1182,7 @@ class TestBackupCredentials(_TestWithFakeDeviceAndFakeUserScope):
                 path,
                 self.fake_other_home
                 / ".config/systemd/user"
-                / f"automatic-backup-{device.systemd_escaped}.service.d"
+                / f"automatic-backup-{location.systemd_escaped}.service.d"
                 / "credential.conf",
             )
             self.assertEqual(uid, self.fake_other_uid)
@@ -1207,10 +1195,12 @@ class TestBackupCredentials(_TestWithFakeDeviceAndFakeUserScope):
     def test_credential_system(self):
         system_scope = SystemScope()
         credential = SystemdCredential(system_scope, "borgmatic")
-        device = BackupDevice(self.mount_point / "fake/path", "fake-repo")
-        config = BackupConfig(system_scope, device, credential)
+        location = BackupLocation(self.mount_point / "fake/path", "fake-repo")
+        config = BackupConfig(system_scope, location, credential)
         script = BackupScript()
-        service = BackupServiceFile(scope=system_scope, device=device, config=config, script=script)
+        service = BackupServiceFile(
+            scope=system_scope, location=location, config=config, script=script
+        )
         credential_dropin = BackupServiceCredentialFile(system_scope, service, credential)
 
         with mock.patch("subprocess.check_output") as mock_check_output:
@@ -1232,7 +1222,7 @@ class TestBackupCredentials(_TestWithFakeDeviceAndFakeUserScope):
             self.assertEqual(
                 path,
                 Path("/etc/systemd/system")
-                / f"automatic-backup-{device.systemd_escaped}.service.d"
+                / f"automatic-backup-{location.systemd_escaped}.service.d"
                 / "credential.conf",
             )
             self.assertEqual(uid, 0)
@@ -1243,7 +1233,7 @@ class TestBackupCredentials(_TestWithFakeDeviceAndFakeUserScope):
             self.assertIn(f"[Service]\n{self.credential_text}", content)
 
 
-class TestBackupServiceSetup(_TestWithFakeDeviceAndFakeUserScope):
+class TestBackupServiceSetup(_TestWithFakeLocationAndFakeUserScope):
     credential_text = "-encrypted-password"
     credential_text_plain = f"SetCredentialEncrypted=borgmatic:{credential_text}"
 
@@ -1254,14 +1244,14 @@ class TestBackupServiceSetup(_TestWithFakeDeviceAndFakeUserScope):
 
     def test_export_key_current_user(self):
         current_scope = UserScope(self.fake_current_user)
-        device = BackupDevice(self.mount_point / "fake/path", "fake-repo")
-        current_backup_service = BackupServiceSetup(current_scope, device)
+        location = BackupLocation(self.mount_point / "fake/path", "fake-repo")
+        current_backup_service = BackupServiceSetup(current_scope, location)
         credential = SystemdCredential(current_scope, "borgmatic")
         with mock.patch("subprocess.check_output") as mock_check_output:
             mock_check_output.side_effect = self.__fake_check_output
             credential.set_value("secret-password")
             self.assertEqual(credential.encrypted_plain, self.credential_text_plain)
-        config = BackupConfig(current_scope, device, credential)
+        config = BackupConfig(current_scope, location, credential)
         with (
             TemporaryDirectory() as tmp_dir,
             mock.patch("subprocess.run") as mock_run,
@@ -1286,7 +1276,7 @@ class TestBackupServiceSetup(_TestWithFakeDeviceAndFakeUserScope):
                     "--path",
                     str(
                         export_path
-                        / f"{device.systemd_escaped}-{self.fake_current_user}-fake-repo.key"
+                        / f"{location.systemd_escaped}-{self.fake_current_user}-fake-repo.key"
                     ),
                 ],
                 check=True,
@@ -1295,8 +1285,8 @@ class TestBackupServiceSetup(_TestWithFakeDeviceAndFakeUserScope):
     def test_export_key_other_user(self):
         other_scope = UserScope(self.fake_other_user)
         repo_name = "fake-repo"
-        device = BackupDevice(self.mount_point / "fake/path", "fake-repo")
-        other_backup_service = BackupServiceSetup(other_scope, device)
+        location = BackupLocation(self.mount_point / "fake/path", "fake-repo")
+        other_backup_service = BackupServiceSetup(other_scope, location)
         credential = SystemdCredential(other_scope, "borgmatic")
         with (
             mock.patch("subprocess.check_output") as mock_check_output,
@@ -1305,7 +1295,7 @@ class TestBackupServiceSetup(_TestWithFakeDeviceAndFakeUserScope):
             mock_check_output.side_effect = self.__fake_check_output
             credential.set_value("secret-password")
             self.assertEqual(credential.encrypted_plain, self.credential_text_plain)
-        config = BackupConfig(other_scope, device, credential)
+        config = BackupConfig(other_scope, location, credential)
         with (
             TemporaryDirectory() as tmp_dir,
             mock.patch("subprocess.run") as mock_run,
@@ -1338,7 +1328,7 @@ class TestBackupServiceSetup(_TestWithFakeDeviceAndFakeUserScope):
                     "--path",
                     str(
                         export_path
-                        / f"{device.systemd_escaped}-{self.fake_other_user}-{repo_name}.key"
+                        / f"{location.systemd_escaped}-{self.fake_other_user}-{repo_name}.key"
                     ),
                 ],
                 check=True,
@@ -1347,8 +1337,8 @@ class TestBackupServiceSetup(_TestWithFakeDeviceAndFakeUserScope):
     def test_export_key_system(self):
         system_scope = SystemScope()
         repo_name = "fake-repo"
-        device = BackupDevice(self.mount_point / "fake/path", "fake-repo")
-        current_backup_service = BackupServiceSetup(system_scope, device)
+        location = BackupLocation(self.mount_point / "fake/path", "fake-repo")
+        current_backup_service = BackupServiceSetup(system_scope, location)
         credential = SystemdCredential(system_scope, "borgmatic")
         with (
             mock.patch("subprocess.check_output") as mock_check_output,
@@ -1357,7 +1347,7 @@ class TestBackupServiceSetup(_TestWithFakeDeviceAndFakeUserScope):
             mock_check_output.side_effect = self.__fake_check_output
             credential.set_value("secret-password")
             self.assertEqual(credential.encrypted_plain, self.credential_text_plain)
-        config = BackupConfig(system_scope, device, credential)
+        config = BackupConfig(system_scope, location, credential)
         with (
             TemporaryDirectory() as tmp_dir,
             mock.patch("subprocess.run") as mock_run,
@@ -1384,7 +1374,7 @@ class TestBackupServiceSetup(_TestWithFakeDeviceAndFakeUserScope):
                     "--config",
                     str(config.file_path()),
                     "--path",
-                    str(export_path / f"{device.systemd_escaped}-root-{repo_name}.key"),
+                    str(export_path / f"{location.systemd_escaped}-root-{repo_name}.key"),
                 ],
                 check=True,
             )
@@ -1392,7 +1382,7 @@ class TestBackupServiceSetup(_TestWithFakeDeviceAndFakeUserScope):
     # pylint: disable=too-many-locals
     def test_setup_current_user(self):
         current_scope = UserScope(self.fake_current_user)
-        device = BackupDevice(self.mount_point / "fake/path", "fake-repo")
+        location = BackupLocation(self.mount_point / "fake/path", "fake-repo")
 
         with (
             TemporaryDirectory() as tmp_dir,
@@ -1409,7 +1399,7 @@ class TestBackupServiceSetup(_TestWithFakeDeviceAndFakeUserScope):
             mock_ask_user_confirmation.return_value = True
             mock_i_am_root.return_value = True
 
-            current_backup_service = BackupServiceSetup(current_scope, device)
+            current_backup_service = BackupServiceSetup(current_scope, location)
             current_backup_service.setup(key_path=Path(tmp_dir), notify_user="fake")
 
             mock_prompt_password.assert_called_once()
@@ -1423,7 +1413,7 @@ class TestBackupServiceSetup(_TestWithFakeDeviceAndFakeUserScope):
                 install_dropin_args["path"],
                 self.fake_current_home
                 / ".config/systemd/user"
-                / f"automatic-backup-{device.systemd_escaped}.service.d"
+                / f"automatic-backup-{location.systemd_escaped}.service.d"
                 / "credential.conf",
             )
             self.assertEqual(install_dropin_args["uid"], self.fake_current_uid)
@@ -1432,13 +1422,13 @@ class TestBackupServiceSetup(_TestWithFakeDeviceAndFakeUserScope):
             self.assertEqual(
                 install_exclude_args["path"],
                 self.fake_current_home
-                / f".config/borgmatic/excludes-user-{device.systemd_escaped}",
+                / f".config/borgmatic/excludes-user-{location.systemd_escaped}",
             )
             self.assertEqual(install_exclude_args["uid"], self.fake_current_uid)
             self.assertEqual(install_exclude_args["gid"], self.fake_current_gid)
             config_path = (
                 self.fake_current_home
-                / f".config/borgmatic/borgmatic-config-{device.systemd_escaped}.yaml"
+                / f".config/borgmatic/borgmatic-config-{location.systemd_escaped}.yaml"
             )
             self.assertEqual(
                 install_config_args["path"],
@@ -1449,7 +1439,7 @@ class TestBackupServiceSetup(_TestWithFakeDeviceAndFakeUserScope):
             self.assertEqual(
                 install_service_args["path"],
                 self.fake_current_home
-                / f".config/systemd/user/automatic-backup-{device.systemd_escaped}.service",
+                / f".config/systemd/user/automatic-backup-{location.systemd_escaped}.service",
             )
             self.assertEqual(install_service_args["uid"], self.fake_current_uid)
             self.assertEqual(install_service_args["gid"], self.fake_current_gid)
@@ -1485,7 +1475,7 @@ class TestBackupServiceSetup(_TestWithFakeDeviceAndFakeUserScope):
                             "--config",
                             str(config_path),
                             "--path",
-                            f"{tmp_dir}/{device.systemd_escaped}-fakecurrentuser-fake-repo.key",
+                            f"{tmp_dir}/{location.systemd_escaped}-fakecurrentuser-fake-repo.key",
                         ],
                         check=True,
                     ),
@@ -1494,7 +1484,7 @@ class TestBackupServiceSetup(_TestWithFakeDeviceAndFakeUserScope):
                             "systemctl",
                             "--user",
                             "enable",
-                            f"automatic-backup-{device.systemd_escaped}.service",
+                            f"automatic-backup-{location.systemd_escaped}.service",
                         ],
                         check=True,
                     ),
@@ -1504,7 +1494,7 @@ class TestBackupServiceSetup(_TestWithFakeDeviceAndFakeUserScope):
     # pylint: disable=too-many-locals
     def test_setup_other_user(self):
         other_scope = UserScope(self.fake_other_user)
-        device = BackupDevice(self.mount_point / "fake/path", "fake-repo")
+        location = BackupLocation(self.mount_point / "fake/path", "fake-repo")
 
         with (
             TemporaryDirectory() as tmp_dir,
@@ -1521,7 +1511,7 @@ class TestBackupServiceSetup(_TestWithFakeDeviceAndFakeUserScope):
             mock_ask_user_confirmation.return_value = True
             mock_i_am_root.return_value = True
 
-            other_backup_service = BackupServiceSetup(other_scope, device)
+            other_backup_service = BackupServiceSetup(other_scope, location)
             other_backup_service.setup(key_path=Path(tmp_dir), notify_user="fake")
 
             mock_prompt_password.assert_called_once()
@@ -1535,7 +1525,7 @@ class TestBackupServiceSetup(_TestWithFakeDeviceAndFakeUserScope):
                 install_dropin_args["path"],
                 self.fake_other_home
                 / ".config/systemd/user"
-                / f"automatic-backup-{device.systemd_escaped}.service.d"
+                / f"automatic-backup-{location.systemd_escaped}.service.d"
                 / "credential.conf",
             )
             self.assertEqual(install_dropin_args["uid"], self.fake_other_uid)
@@ -1543,13 +1533,14 @@ class TestBackupServiceSetup(_TestWithFakeDeviceAndFakeUserScope):
 
             self.assertEqual(
                 install_exclude_args["path"],
-                self.fake_other_home / f".config/borgmatic/excludes-user-{device.systemd_escaped}",
+                self.fake_other_home
+                / f".config/borgmatic/excludes-user-{location.systemd_escaped}",
             )
             self.assertEqual(install_exclude_args["uid"], self.fake_other_uid)
             self.assertEqual(install_exclude_args["gid"], self.fake_other_gid)
             config_path = (
                 self.fake_other_home
-                / f".config/borgmatic/borgmatic-config-{device.systemd_escaped}.yaml"
+                / f".config/borgmatic/borgmatic-config-{location.systemd_escaped}.yaml"
             )
             self.assertEqual(
                 install_config_args["path"],
@@ -1560,7 +1551,7 @@ class TestBackupServiceSetup(_TestWithFakeDeviceAndFakeUserScope):
             self.assertEqual(
                 install_service_args["path"],
                 self.fake_other_home
-                / f".config/systemd/user/automatic-backup-{device.systemd_escaped}.service",
+                / f".config/systemd/user/automatic-backup-{location.systemd_escaped}.service",
             )
             self.assertEqual(install_service_args["uid"], self.fake_other_uid)
             self.assertEqual(install_service_args["gid"], self.fake_other_gid)
@@ -1602,7 +1593,7 @@ class TestBackupServiceSetup(_TestWithFakeDeviceAndFakeUserScope):
                             "--config",
                             str(config_path),
                             "--path",
-                            f"{tmp_dir}/{device.systemd_escaped}-fakeotheruser-fake-repo.key",
+                            f"{tmp_dir}/{location.systemd_escaped}-fakeotheruser-fake-repo.key",
                         ],
                         check=True,
                     ),
@@ -1614,7 +1605,7 @@ class TestBackupServiceSetup(_TestWithFakeDeviceAndFakeUserScope):
                             "systemctl",
                             "--user",
                             "enable",
-                            f"automatic-backup-{device.systemd_escaped}.service",
+                            f"automatic-backup-{location.systemd_escaped}.service",
                         ],
                         check=True,
                     ),
@@ -1623,7 +1614,7 @@ class TestBackupServiceSetup(_TestWithFakeDeviceAndFakeUserScope):
 
     def test_setup_system(self):
         system_scope = SystemScope()
-        device = BackupDevice(self.mount_point / "fake/path", "fake-repo")
+        location = BackupLocation(self.mount_point / "fake/path", "fake-repo")
 
         with (
             TemporaryDirectory() as tmp_dir,
@@ -1640,7 +1631,7 @@ class TestBackupServiceSetup(_TestWithFakeDeviceAndFakeUserScope):
             mock_ask_user_confirmation.return_value = True
             mock_i_am_root.return_value = True
 
-            system_backup_service = BackupServiceSetup(system_scope, device)
+            system_backup_service = BackupServiceSetup(system_scope, location)
             system_backup_service.setup(key_path=Path(tmp_dir), notify_user="fake")
 
             mock_prompt_password.assert_called_once()
@@ -1653,7 +1644,7 @@ class TestBackupServiceSetup(_TestWithFakeDeviceAndFakeUserScope):
             self.assertEqual(
                 install_dropin_args["path"],
                 Path("/etc/systemd/system")
-                / f"automatic-backup-{device.systemd_escaped}.service.d"
+                / f"automatic-backup-{location.systemd_escaped}.service.d"
                 / "credential.conf",
             )
             self.assertEqual(install_dropin_args["uid"], 0)
@@ -1661,17 +1652,20 @@ class TestBackupServiceSetup(_TestWithFakeDeviceAndFakeUserScope):
 
             self.assertEqual(
                 isntall_exclude_args["path"],
-                Path("/etc") / f"borgmatic/excludes-system-{device.systemd_escaped}",
+                Path("/etc") / f"borgmatic/excludes-system-{location.systemd_escaped}",
             )
             self.assertEqual(isntall_exclude_args["uid"], 0)
             self.assertEqual(isntall_exclude_args["gid"], 0)
-            config_path = Path("/etc") / f"borgmatic/borgmatic-config-{device.systemd_escaped}.yaml"
+            config_path = (
+                Path("/etc") / f"borgmatic/borgmatic-config-{location.systemd_escaped}.yaml"
+            )
             self.assertEqual(install_config_args["path"], config_path)
             self.assertEqual(install_config_args["uid"], 0)
             self.assertEqual(install_config_args["gid"], 0)
             self.assertEqual(
                 install_service_args["path"],
-                Path("/etc/systemd/system") / f"automatic-backup-{device.systemd_escaped}.service",
+                Path("/etc/systemd/system")
+                / f"automatic-backup-{location.systemd_escaped}.service",
             )
             self.assertEqual(install_service_args["uid"], 0)
             self.assertEqual(install_service_args["gid"], 0)
@@ -1705,7 +1699,7 @@ class TestBackupServiceSetup(_TestWithFakeDeviceAndFakeUserScope):
                             "--config",
                             str(config_path),
                             "--path",
-                            f"{tmp_dir}/{device.systemd_escaped}-root-fake-repo.key",
+                            f"{tmp_dir}/{location.systemd_escaped}-root-fake-repo.key",
                         ],
                         check=True,
                     ),
@@ -1713,7 +1707,7 @@ class TestBackupServiceSetup(_TestWithFakeDeviceAndFakeUserScope):
                         [
                             "systemctl",
                             "enable",
-                            f"automatic-backup-{device.systemd_escaped}.service",
+                            f"automatic-backup-{location.systemd_escaped}.service",
                         ],
                         check=True,
                     ),

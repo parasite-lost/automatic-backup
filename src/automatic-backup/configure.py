@@ -577,97 +577,134 @@ class SystemdCredential:
         self.__encrypt_plain(value)
 
 
-class BackupDevice:  # pylint: disable=too-many-instance-attributes
-    """
-    This class represents a backup device containing a borg repo.
-    """
+@dataclass(kw_only=True)
+class MountData:
+    """mount data for an external filesystem"""
 
-    def __init__(self, path: Path, repo_suffix: str):
-        """
-        path: backup device mount path (needs to be currently mounted)
-        """
-        try:
-            resolved_path = path.resolve()
-            findmnt_data = self._findmnt(resolved_path)
-            parsed_data = json.loads(findmnt_data)
-            file_system = parsed_data["filesystems"][0]
-            self.__device: str = file_system["source"]
-            self.__mount_point: Path = Path(file_system["target"])
-            self.__subfolder: Path = resolved_path.relative_to(self.__mount_point)
-            self.__filesystem_type: str = file_system["fstype"]
-            self.__uuid: str = file_system["uuid"]
-            self.__systemd_escaped: str = systemd_escape(file_system["target"])
-            self.__mount_unit: str = f"{self.__systemd_escaped}.mount"
-            self.__repo_suffix: str = repo_suffix
-        except subprocess.CalledProcessError as e:
-            _os_error(e)
+    device: Path
+    mount_point: Path
+    uuid: str
 
-    @staticmethod
-    def _findmnt(path: Path) -> str:
-        return subprocess.check_output(
+
+def get_mount_data(path: Path, /, source: bool) -> MountData:
+    """find mount information based on source or target path
+
+    Args:
+        path (Path): path to query information for
+        source (bool): whether path is a source (true) or target (false) path
+
+    Returns:
+    """
+    if source:
+        direction = "--source"
+    else:
+        direction = "--target"
+    try:
+        findmnt_data = subprocess.check_output(
             [
                 "findmnt",
                 "--json",
                 "--nofsroot",
                 "--output",
-                "SOURCE,TARGET,FSTYPE,UUID",
-                "--target",
+                "SOURCE,TARGET,UUID",
+                direction,
                 f"{path}",
             ],
         ).decode()
+        parsed_data = json.loads(findmnt_data)
+        file_system = parsed_data["filesystems"][0]
+        return MountData(
+            device=file_system["source"],
+            mount_point=Path(file_system["target"]),
+            uuid=file_system["uuid"],
+        )
+    except subprocess.CalledProcessError as e:
+        _os_error(e)
+
+
+class ExternalFileSystem:
+    """This class represents an external filesystem"""
+
+    def __init__(self, path: Path):
+        self._update_mount_data(path, source=False)
+
+    def _update_mount_data(self, path: Path, source: bool = False):
+        self._mount_data = get_mount_data(path, source)
+        self._systemd_escaped: str = systemd_escape(self._mount_data.mount_point)
+        self._mount_unit: str = f"{self._systemd_escaped}.mount"
 
     @property
-    def folder(self) -> Path:
-        """backup folder (where to place backups)"""
-        return self.__mount_point / self.__subfolder
-
-    @property
-    def repo_suffix(self) -> str:
-        """borg repository suffix"""
-        return self.__repo_suffix
-
-    @property
-    def device(self) -> str:
+    def device(self) -> Path:
         """source device (node)"""
-        return self.__device
+        return self._mount_data.device
 
     @property
     def mount_point(self) -> Path:
         """mount point"""
-        return self.__mount_point
-
-    @property
-    def filesystem_type(self) -> str:
-        """filesystem type"""
-        return self.__filesystem_type
+        return self._mount_data.mount_point
 
     @property
     def uuid(self) -> str:
         """filesystem uuid"""
-        return self.__uuid
+        return self._mount_data.uuid
 
     @property
     def systemd_escaped(self) -> str:
         """systemd escaped mount path"""
-        return self.__systemd_escaped
+        return self._systemd_escaped
 
     @property
     def mount_unit(self) -> str:
         """systemd mount unit"""
-        return self.__mount_unit
+        return self._mount_unit
 
     def __str__(self) -> str:
-        # tested
         return (
-            "Backup target:\n"
+            "Mount target:\n"
             f"  - Device: {self.device}\n"
             f"  - Mount point: {self.mount_point}\n"
-            f"  - Backup path: {self.folder}\n"
-            f"  - Filesystem: {self.filesystem_type}\n"
             f"  - UUID: {self.uuid}\n"
             f"  - Mount target: {self.systemd_escaped}\n"
             f"  - Mount unit: {self.mount_unit}\n"
+        )
+
+
+class BackupLocation(ExternalFileSystem):  # pylint: disable=too-many-instance-attributes
+    """
+    This class represents a backup location.
+    """
+
+    def __init__(self, path: Path, repo_suffix: str):
+        """backup location
+
+        Args:
+            path (Path): path to backup location
+            repo_suffix (str): backup repository name suffix
+        """
+        resolved_path = path.resolve()
+        super().__init__(resolved_path)
+        self._subfolder: Path = resolved_path.relative_to(self.mount_point, walk_up=False)
+        self._repo_suffix: str = repo_suffix
+
+    @property
+    def folder(self) -> Path:
+        """backup folder (where to place backups)"""
+        return self.mount_point / self._subfolder
+
+    @property
+    def repo_suffix(self) -> str:
+        """borg repository suffix"""
+        return self._repo_suffix
+
+    def __str__(self) -> str:
+        return (
+            "Backup location:\n"
+            f"  - Backup path: {self.folder}\n"
             f"  - Repo suffix: {self.repo_suffix}\n"
+            f"  - Device: {self.device}\n"
+            f"  - UUID: {self.uuid}\n"
+            f"  - Mount point: {self.mount_point}\n"
+            f"  - Mount target: {self.systemd_escaped}\n"
         )
 
 
@@ -783,10 +820,10 @@ class BackupExcludeUserFile(_ConfigFileTemplate):
     template_file = "excludes-user"
     config_dir = "borgmatic"
 
-    def __init__(self, user_scope: UserScope, device: BackupDevice):
+    def __init__(self, user_scope: UserScope, location: BackupLocation):
         super().__init__(
             scope=user_scope,
-            file_name=f"excludes-user-{device.systemd_escaped}",
+            file_name=f"excludes-user-{location.systemd_escaped}",
         )
 
     @override
@@ -802,10 +839,10 @@ class BackupExcludeSystemFile(_ConfigFileTemplate):
     template_file = "excludes-system"
     config_dir = "borgmatic"
 
-    def __init__(self, device: BackupDevice):
+    def __init__(self, location: BackupLocation):
         super().__init__(
             scope=SystemScope(),
-            file_name=f"excludes-system-{device.systemd_escaped}",
+            file_name=f"excludes-system-{location.systemd_escaped}",
         )
 
     @override
@@ -819,23 +856,23 @@ class BackupConfig(_ConfigFileTemplate):
     template_file = "borgmatic-config.yaml"
     config_dir = "borgmatic"
 
-    def __init__(self, scope: _Scope, device: BackupDevice, credential: SystemdCredential):
+    def __init__(self, scope: _Scope, location: BackupLocation, credential: SystemdCredential):
         if scope.is_system_scope():
-            self.exclude = BackupExcludeSystemFile(device)
+            self.exclude = BackupExcludeSystemFile(location)
         else:
-            self.exclude = BackupExcludeUserFile(scope, device)
+            self.exclude = BackupExcludeUserFile(scope, location)
         self.__credential = credential
-        self.__device = device
+        self.__location = location
         super().__init__(
             scope=scope,
-            file_name=f"borgmatic-config-{device.systemd_escaped}.yaml",
+            file_name=f"borgmatic-config-{location.systemd_escaped}.yaml",
         )
 
     def _folder(self) -> Path:
-        return self.__device.folder
+        return self.__location.folder
 
     def _repo(self) -> str:
-        return f"{self._scope.scope()}-{self.__device.repo_suffix}"
+        return f"{self._scope.scope()}-{self.__location.repo_suffix}"
 
     def repo_path(self) -> Path:
         """repository path"""
@@ -879,16 +916,16 @@ class BackupServiceFile(_FileTemplate):
         self,
         *,
         scope: _Scope,
-        device: BackupDevice,
+        location: BackupLocation,
         config: BackupConfig,
         script: BackupScript,
         notify_user: str = None,
     ):
         super().__init__(
-            file_name=f"automatic-backup-{device.systemd_escaped}",
+            file_name=f"automatic-backup-{location.systemd_escaped}",
         )
         self.__scope = scope
-        self.__device = device
+        self.__location = location
         self.__config = config
         self.__script = script
         self.__notify_user = notify_user
@@ -899,9 +936,9 @@ class BackupServiceFile(_FileTemplate):
         # note: mount unit must not be escaped (it is already correctly encoded
         # for systemd), uuid is safe
         self._substitutions = {
-            "@@BACKUP_FOLDER@@": str(self.__device.folder).replace("\\", "\\\\"),
-            "@@MOUNT_UNIT@@": self.__device.mount_unit,
-            "@@DEVICE_UUID@@": self.__device.uuid,
+            "@@BACKUP_FOLDER@@": str(self.__location.folder).replace("\\", "\\\\"),
+            "@@MOUNT_UNIT@@": self.__location.mount_unit,
+            "@@DEVICE_UUID@@": self.__location.uuid,
             "@@SCRIPT_NAME@@": str(self.__script.file_path()).replace("\\", "\\\\"),
             "@@BACKUP_CONFIG_FILE@@": str(self.__config.file_path()).replace("\\", "\\\\"),
         }
@@ -963,9 +1000,9 @@ class BackupServiceCredentialFile(_FileTemplate):
 class BackupServiceSetup:  # pylint: disable=too-few-public-methods
     """This class provides configurataion and installation of the backup service."""
 
-    def __init__(self, scope: _Scope, device: BackupDevice):
+    def __init__(self, scope: _Scope, location: BackupLocation):
         self.__scope = scope
-        self.__device = device
+        self.__location = location
 
     def create_repo(self, config: BackupConfig, credential: SystemdCredential):
         """create initial backup repo
@@ -1004,9 +1041,9 @@ class BackupServiceSetup:  # pylint: disable=too-few-public-methods
         """
         create_dir(path=key_path, root_mode=0o777)
         key_file = key_path / (
-            f"{self.__device.systemd_escaped}"
+            f"{self.__location.systemd_escaped}"
             f"-{self.__scope.user()}"
-            f"-{self.__device.repo_suffix}.key"
+            f"-{self.__location.repo_suffix}.key"
         )
         print(f"Exporting repo key for {self.__scope.user()} to {key_path}")
         base_command = [
@@ -1043,13 +1080,13 @@ class BackupServiceSetup:  # pylint: disable=too-few-public-methods
         credential = SystemdCredential(self.__scope, "borgmatic")
 
         # 3. configure backup configuration
-        config = BackupConfig(self.__scope, self.__device, credential)
+        config = BackupConfig(self.__scope, self.__location, credential)
 
         # 4. configure service
         backup_script = BackupScript()
         service = BackupServiceFile(
             scope=self.__scope,
-            device=self.__device,
+            location=self.__location,
             config=config,
             script=backup_script,
             notify_user=notify_user,
