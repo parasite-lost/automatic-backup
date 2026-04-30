@@ -554,7 +554,7 @@ class SystemdCredential:
     def encrypted_pretty(self):
         """pretty encoded systemd credential, ready to be inserted into a
         systemd unit. Needs to be set with set_password first."""
-        if not self.__encrypted_pretty:
+        if self.__encrypted_pretty is None:
             raise RuntimeError("No password has been set.")
         return self.__encrypted_pretty
 
@@ -562,7 +562,7 @@ class SystemdCredential:
     def encrypted_plain(self):
         """plain encoded systemd credential, ready to be inserted into a
         systemd unit. Needs to be set with set_password first."""
-        if not self.__encrypted_plain:
+        if self.__encrypted_plain is None:
             raise RuntimeError("No password has been set.")
         return self.__encrypted_plain
 
