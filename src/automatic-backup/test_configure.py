@@ -23,8 +23,10 @@ from configure import (
     BackupServiceFile,
     BackupServiceCredentialFile,
     BackupServiceSetup,
-    Ext4UdevRule,
+    ExternalFileSystem,
     MountData,
+    PrivateUdevRule,
+    SharedUdevRule,
     SystemdCredential,
     SystemScope,
     UserScope,
@@ -773,16 +775,41 @@ class _TestWithFakeLocationAndFakeUserScope(
         _TestConfigureBase.setUp(self)
 
 
-class TestExt4UdevRule(_TestWithFakeLocationAndFakeUserScope):
+class TestPrivateUdevRule(_TestWithFakeLocationAndFakeUserScope):
     def test_rule_content(self):
-        backup_location = BackupLocation(self.mount_point / "fake/backup", "suffix")
-        udev_rule = Ext4UdevRule(backup_location)
+        file_system = ExternalFileSystem(self.mount_point)
+        udev_rule = PrivateUdevRule(file_system)
 
         udev_rule_content = (
             f'SUBSYSTEM=="block", ENV{{ID_FS_UUID}}=="{self.uuid}" ENV{{UDISKS_AUTO}}="1"\n'
         )
 
-        udev_rule_file = Path("/etc/udev/rules.d") / f"65-ext4-automount-{self.uuid}.rules"
+        udev_rule_file = Path("/etc/udev/rules.d") / f"65-automatic-backup-{self.uuid}.rules"
+
+        with (
+            mock.patch("configure.write_file") as mock_write_file,
+            mock.patch("configure.create_dir"),
+        ):
+            udev_rule.install()
+            mock_write_file.assert_called_once_with(
+                path=udev_rule_file,
+                content=udev_rule_content,
+                uid=0,
+                gid=0,
+            )
+
+
+class TestSharedUdevRule(_TestWithFakeLocationAndFakeUserScope):
+    def test_rule_content(self):
+        file_system = ExternalFileSystem(self.mount_point)
+        udev_rule = SharedUdevRule(file_system)
+
+        udev_rule_content = (
+            f'SUBSYSTEM=="block", ENV{{ID_FS_UUID}}=="{self.uuid}" '
+            f'ENV{{UDISKS_AUTO}}="1" ENV{{UDISKS_FILESYSTEM_SHARED}}="1"\n'
+        )
+
+        udev_rule_file = Path("/etc/udev/rules.d") / f"65-automatic-backup-{self.uuid}.rules"
 
         with (
             mock.patch("configure.write_file") as mock_write_file,

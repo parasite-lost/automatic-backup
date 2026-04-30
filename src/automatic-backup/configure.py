@@ -796,22 +796,35 @@ class _ConfigFileTemplate(_FileTemplate):
         )
 
 
-class Ext4UdevRule(_ConfigFileTemplate):
-    """Template file for udev rule for automounting ext4 partition."""
+class _AutomaticBackupUdevRule(_ConfigFileTemplate):
+    """basic udev rule"""
 
-    template_file = "65-ext4-automount-UUID.rules"
+    template_file = None
     config_dir = "udev/rules.d"
 
-    def __init__(self, device: BackupDevice):
+    def __init__(self, file_system: ExternalFileSystem):
         super().__init__(
             scope=SystemScope(),
-            file_name=f"65-ext4-automount-{device.uuid}.rules",
+            file_name=f"65-automatic-backup-{file_system.uuid}.rules",
         )
-        self.__device_uuid = device.uuid
+        self.__device_uuid = file_system.uuid
 
     @override
     def _resolve_substitutions(self):
         self._substitutions = {"@@DEVICE_UUID@@": self.__device_uuid}
+
+
+class PrivateUdevRule(_AutomaticBackupUdevRule):
+    """Template file for udev rule for automounting a filesystem privately."""
+
+    template_file = "65-private-automount-UUID.rules"
+
+
+class SharedUdevRule(_AutomaticBackupUdevRule):
+    """Template file for udev rule for automounting as filesystem accessible to
+    all users."""
+
+    template_file = "65-shared-automount-UUID.rules"
 
 
 class BackupExcludeUserFile(_ConfigFileTemplate):
@@ -1270,7 +1283,7 @@ def main() -> None:
 
     # 5. check udev -> install udev
     if i_am_root() and backup_device.filesystem_type == "ext4":
-        udev_rule = Ext4UdevRule(backup_device)
+        udev_rule = PrivateUdevRule(backup_device)
         udev_question = "Automatically mount backup device (ext4)?"
         if udev_rule.is_installed():
             if ask_user_confirmation(f"Overwrite Configuration?\n{udev_question}"):
