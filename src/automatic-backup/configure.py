@@ -9,6 +9,7 @@ import argparse
 import json
 import os
 import pwd
+import stat
 import subprocess
 import sys
 
@@ -584,6 +585,7 @@ class MountData:
     device: Path
     mount_point: Path
     uuid: str
+    hotplug: bool
 
 
 def get_mount_data(path: Path, /, source: bool) -> MountData:
@@ -610,13 +612,28 @@ def get_mount_data(path: Path, /, source: bool) -> MountData:
                 direction,
                 f"{path}",
             ],
-        ).decode()
-        parsed_data = json.loads(findmnt_data)
-        file_system = parsed_data["filesystems"][0]
+            text=True,
+        )
+        parsed_findmnt_json = json.loads(findmnt_data)
+        file_system = parsed_findmnt_json["filesystems"][0]
+        device = file_system["source"]
+        lsblk_data = subprocess.check_output(
+            [
+                "lsblk",
+                "--json",
+                "--output",
+                "HOTPLUG",
+                device,
+            ],
+            text=True,
+        )
+        parsed_lsblk_json = json.loads(lsblk_data)
+        hotplug_data = parsed_lsblk_json["blockdevices"][0]
         return MountData(
-            device=file_system["source"],
+            device=Path(device),
             mount_point=Path(file_system["target"]),
             uuid=file_system["uuid"],
+            hotplug=hotplug_data["hotplug"],
         )
     except subprocess.CalledProcessError as e:
         _os_error(e)
@@ -657,6 +674,11 @@ class ExternalFileSystem:
     def mount_unit(self) -> str:
         """systemd mount unit"""
         return self._mount_unit
+
+    @property
+    def hotpluggable(self) -> bool:
+        """whether filesystem is hotpluggable"""
+        return self._mount_data.hotplug
 
     def __str__(self) -> str:
         return (
@@ -706,6 +728,12 @@ class BackupLocation(ExternalFileSystem):  # pylint: disable=too-many-instance-a
             f"  - Mount point: {self.mount_point}\n"
             f"  - Mount target: {self.systemd_escaped}\n"
         )
+
+    def allows_multi_user_access(self):
+        """Check if permissions for the location are rwx for others"""
+        perms = self.folder.stat().st_mode
+        full_access = stat.S_IROTH | stat.S_IWOTH | stat.S_IXOTH
+        return perms & full_access == full_access
 
 
 class _FileTemplate(metaclass=abc.ABCMeta):
@@ -1169,103 +1197,104 @@ def get_user_scopes(user_list: list[str]) -> set[_Scope]:
     return scopes
 
 
-def main() -> None:
-    """main function"""
+@dataclass(kw_only=True)
+class _Command:
+    command: str
 
-    # pylint: disable=too-many-instance-attributes
-    @dataclass(kw_only=True)
-    class Arguments:
-        """CLI argument type annotation helper"""
 
-        dry_run: bool
-        path: Path
-        repo: str
-        info: bool
-        user: list[str]
-        system: bool
-        notify: str | None
-        key_path: Path
+@dataclass(kw_only=True)
+class SetupAutoMountCommand(_Command):
+    """CLI argument type annotation helper for auto mount configuration"""
 
-    def parse_arguments() -> Arguments:
-        """Parse commandline arguments.
+    dry_run: bool
+    mount_path: Path
+    shared: bool
 
-        Returns:
-            Arguments: parsed commandline arguments
-        """
-        parser = argparse.ArgumentParser(
-            prog="configure-automatic-backup",
-            description="Configure automatic backup on mounting configured filesystem.",
-        )
-        parser.add_argument("--version", action="version", version=f"{parser.prog} {__VERSION}")
-        parser.add_argument(
-            "--dry-run", action="store_true", help="Dry-run", default=False, required=False
-        )
-        parser.add_argument(
-            "--path",
-            metavar="FOLDER",
-            type=Path,
-            help="Base path where backups will be stored (mount point of backup filesystem).",
-            required=True,
-        )
-        parser.add_argument(
-            "--repo",
-            metavar="REPO-NAME",
-            type=str,
-            help="Base backup repository name.",
-            required=True,
-        )
-        parser.add_argument(
-            "--info", action="store_true", default=False, help="Only print information."
-        )
-        parser.add_argument(
-            "--user",
-            action="append",
-            type=str,
-            help="Install user service for given username.",
-        )
-        parser.add_argument(
-            "--system",
-            action="store_true",
-            default=False,
-            help="Install system service.",
-        )
-        parser.add_argument(
-            "--notify",
-            metavar="USER",
-            type=str,
-            help="User to inform about backup progress via notif-send.",
-            default=None,
-            required=False,
-        )
-        parser.add_argument(
-            "--key-path",
-            metavar="FOLDER",
-            type=Path,
-            help="Path where to store repo keys",
-            default=Path.cwd() / "borg-keys",
-            required=False,
-        )
-        args, _ = parser.parse_known_args()
-        return Arguments(**vars(args))
 
-    arguments = parse_arguments()
+# pylint: disable=too-many-instance-attributes
+@dataclass(kw_only=True)
+class SetupBackupCommand(_Command):
+    """CLI argument type annotation helper for auto backup configuration"""
+
+    dry_run: bool
+    path: Path
+    repo: str
+    info: bool
+    user: list[str]
+    system: bool
+    notify: str | None
+    key_path: Path
+
+
+def configure_automount(arguments: SetupAutoMountCommand):
+    """Configure automount"""
     set_dry_run(arguments.dry_run)
 
-    # 0. collect information on backup device
-    backup_device = BackupDevice(arguments.path, arguments.repo)
-    print(backup_device)
+    if not i_am_root():
+        print(f"Error: '{arguments.command}' requires root privileges. Aborted.", file=sys.stderr)
+        sys.exit(os.EX_NOPERM)
+    file_system = ExternalFileSystem(arguments.mount_path)
+    if not file_system.hotpluggable:
+        print("Error: hotpluggable block device required. Aborted.", file=sys.stderr)
+        sys.exit(os.EX_USAGE)
+    if file_system.uuid is None:
+        print(f"Error: filesystem has no UUID: {arguments.mount_path}. Aborted.", file=sys.stderr)
+        sys.exit(os.EX_USAGE)
+    if arguments.shared:
+        udev_rule = SharedUdevRule(file_system)
+    else:
+        udev_rule = PrivateUdevRule(file_system)
+    force = False
+    if udev_rule.is_installed():
+        if ask_user_confirmation("Overwrite existing udev configuration?"):
+            force = True
+    print(file_system)
+    if not ask_user_confirmation(f"Continue{' (dry-run)' if arguments.dry_run else ''}?"):
+        print("Aborted.")
+        return
+    udev_rule.install(force)
+    print(f"Please remove and plug in '{file_system.device}' again to confirm configuration works.")
 
-    # 1. determine whether notification service can be enabled
+
+def configure_backup(arguments: SetupBackupCommand):
+    """Configure automatic backup"""
+
+    set_dry_run(arguments.dry_run)
+
+    # 1. collect information on backup location
+    backup_location = BackupLocation(arguments.path, arguments.repo)
+    print(backup_location)
+
+    # 2. check privilege
+    if len(arguments.user) > 1:
+        # multi-user setup
+        if not i_am_root():
+            print("Error: multi-user setup requires root privileges.", file=sys.stderr)
+            sys.exit(os.EX_USAGE)
+        if not backup_location.allows_multi_user_access():
+            print(
+                "Error: multi-user setup requires location with multi-user access.", file=sys.stderr
+            )
+            print(
+                "Consider reconfiguring the external filesystem using 'setup-automount --shared'",
+                file=sys.stderr,
+            )
+            sys.exit(os.EX_USAGE)
+    if arguments.system and not i_am_root():
+        print("Error: multi-user setup requires root privileges.", file=sys.stderr)
+        sys.exit(os.EX_USAGE)
+
+    # 3. determine whether notification service can be enabled
     notify_scope = None
     if arguments.notify:
         if i_am_root() or (arguments.notify == current_username()):
             print(f"Enabling backup status notifications for '{arguments.notify}'")
             notify_scope = UserScope(arguments.notify)
 
-    # 2. determine scopes to install backup service in
+    # 4. determine scopes to install backup service in
     scopes = get_user_scopes(arguments.user)
-    print((f"Installing user backup service for:" f" {", ".join(map(str, scopes))}"))
-    # 3. add system scope if applicable
+    print((f"Installing user backup service for: {', '.join(map(str, scopes))}"))
+    # 5. add system scope if applicable
     if i_am_root():
         scopes.add(SystemScope())
         print("Installing system backup service.")
@@ -1277,24 +1306,116 @@ def main() -> None:
         print("Aborted.")
         return
 
-    # 4. enable notification service
+    # 6. enable notification service
     if notify_scope:
         notify_scope.enable_service("automatic-backup-notification")
 
-    # 5. check udev -> install udev
-    if i_am_root() and backup_device.filesystem_type == "ext4":
-        udev_rule = PrivateUdevRule(backup_device)
-        udev_question = "Automatically mount backup device (ext4)?"
-        if udev_rule.is_installed():
-            if ask_user_confirmation(f"Overwrite Configuration?\n{udev_question}"):
-                udev_rule.install(force=True)
-        elif ask_user_confirmation(udev_question):
-            udev_rule.install()
-
-    # 6. install backup services in all scopes
+    # 7. install backup services in all scopes
     for scope in scopes:
-        backup_service = BackupServiceSetup(scope, backup_device)
+        backup_service = BackupServiceSetup(scope, backup_location)
         backup_service.setup(key_path=arguments.key_path, notify_user=arguments.notify)
+
+
+def main() -> None:
+    """main function"""
+
+    def parse_arguments() -> SetupBackupCommand | SetupAutoMountCommand:
+        """Parse commandline arguments.
+
+        Returns:
+            Arguments: parsed commandline arguments
+        """
+        parser = argparse.ArgumentParser(
+            prog="configure-automatic-backup",
+            description="Configure automatic backup triggered by mounting configured filesystem.",
+        )
+        parser.add_argument("--version", action="version", version=f"{parser.prog} {__VERSION}")
+
+        subparsers = parser.add_subparsers(
+            dest="command", help="Available subcommands", required=True
+        )
+        automount_command_parser = subparsers.add_parser("setup-automount", help="Setup automount.")
+        automount_command_parser.add_argument(
+            "--dry-run", action="store_true", help="Dry-run", default=False, required=False
+        )
+        automount_command_parser.add_argument(
+            "--mount-path",
+            type=Path,
+            help="Mount point of external filesystem to configure",
+            required=True,
+        )
+        automount_command_parser.add_argument(
+            "--shared",
+            action="store_true",
+            help="Configure as shared mount (multi-user setup).",
+            default=False,
+        )
+
+        backup_command_parser = subparsers.add_parser(
+            "setup-backup", help="Setup automatic backup."
+        )
+        backup_command_parser.add_argument(
+            "--dry-run", action="store_true", help="Dry-run", default=False, required=False
+        )
+        backup_command_parser.add_argument(
+            "--path",
+            metavar="FOLDER",
+            type=Path,
+            help="Base path where backups will be stored (mount point of backup filesystem).",
+            required=True,
+        )
+        backup_command_parser.add_argument(
+            "--repo",
+            metavar="REPO-NAME",
+            type=str,
+            help="Base backup repository name.",
+            required=True,
+        )
+        backup_command_parser.add_argument(
+            "--info", action="store_true", default=False, help="Only print information."
+        )
+        backup_command_parser.add_argument(
+            "--user",
+            action="append",
+            type=str,
+            help="Install user service for given username.",
+        )
+        backup_command_parser.add_argument(
+            "--system",
+            action="store_true",
+            default=False,
+            help="Install system service.",
+        )
+        backup_command_parser.add_argument(
+            "--notify",
+            metavar="USER",
+            type=str,
+            help="User to inform about backup progress via notif-send.",
+            default=None,
+            required=False,
+        )
+        backup_command_parser.add_argument(
+            "--key-path",
+            metavar="FOLDER",
+            type=Path,
+            help="Path where to store repo keys",
+            default=Path.cwd() / "borg-keys",
+            required=False,
+        )
+
+        args, _ = parser.parse_known_args()
+        if args.command == "setup-backup":
+            return SetupBackupCommand(**vars(args))
+        if args.command == "setup-automount":
+            return SetupAutoMountCommand(**vars(args))
+        raise NotImplementedError("Unhandled command")
+
+    arguments = parse_arguments()
+
+    if isinstance(arguments, SetupBackupCommand):
+        configure_backup(arguments)
+    elif isinstance(arguments, SetupAutoMountCommand):
+        configure_automount(arguments)
 
 
 if __name__ == "__main__":

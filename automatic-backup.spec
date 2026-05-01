@@ -1,5 +1,5 @@
 Name:          automatic-backup
-Version:       0.3.0
+Version:       0.4.3
 Release:       %autorelease
 Summary:       Run automatic backups
 Vendor:        parasite-lost

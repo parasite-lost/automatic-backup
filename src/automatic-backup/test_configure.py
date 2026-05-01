@@ -33,6 +33,7 @@ from configure import (
     ask_user_confirmation,
     create_dir,
     current_username,
+    get_mount_data,
     i_am_root,
     prompt_password,
     set_dry_run,
@@ -211,6 +212,38 @@ class TestConfigure(_TestConfigureBase):  # pylint: disable=too-many-public-meth
 
     def test_systemd_escape(self):
         self.assertEqual(systemd_escape("/a/b/c/d"), "a-b-c-d")
+
+    def test_get_mount_data(self):
+        with mock.patch("subprocess.check_output") as mock_check_output:
+            fake_device = Path("/dev/sdg3")
+            fake_mount_point = Path("/xyz")
+            fake_uuid = "ab501007-dead-beef-1337-422342234223"
+            mock_check_output.side_effect = [
+                f"""\
+{{
+   "filesystems": [
+      {{
+         "source": "{fake_device}",
+         "target": "{fake_mount_point}",
+         "uuid": "{fake_uuid}"
+      }}
+   ]
+}}""",
+                """\
+{
+   "blockdevices": [
+      {
+         "hotplug": true
+      }
+   ]
+}""",
+            ]
+            path = Path(fake_mount_point)
+            mount_data = get_mount_data(path, source=False)
+            self.assertEqual(mount_data.device, fake_device)
+            self.assertEqual(mount_data.mount_point, fake_mount_point)
+            self.assertEqual(mount_data.uuid, fake_uuid)
+            self.assertEqual(mount_data.hotplug, True)
 
 
 class _TestWithFakeUserScope(_TestConfigureBase):  # pylint: disable=too-many-instance-attributes
@@ -696,21 +729,28 @@ class TestSystemdCredential(_TestWithFakeUserScope):
         self.assertEqual(credential.encrypted_plain, self.plain_encrypted_credential_oneline)
 
 
-class _TestWithFakeLocation(_TestConfigureBase):  # pylint: disable=too-many-public-methods
-    uuid = "ab501007-dead-beef-1337-422342234223"
-    device = Path("/dev/mapper/luks-01234567-89ab-cdef-0123-456789abcdef")
-    mount_point = Path("/run/media/test/target")
-    folder = mount_point / "backup/directory"
-    target = "run-media-test-target"
-    repo_suffix = "testing"
+# pylint: disable=too-many-public-methods
+# pylint: disable=too-many-instance-attributes
+class _TestWithFakeLocation(_TestConfigureBase):
 
-    def __mock_findmnt_return_value(self) -> str:
-        return MountData(device=self.device, mount_point=self.mount_point, uuid=self.uuid)
+    def __mock_get_mount_value(self, *_, **__) -> MountData:
+        return MountData(
+            device=self.device, mount_point=self.mount_point, uuid=self.uuid, hotplug=True
+        )
 
     def _do_setup(self):
+        # pylint: disable=consider-using-with
+        self.tmp_dir = TemporaryDirectory()
+        self.addCleanup(self.tmp_dir.cleanup)
+        self.mount_point = Path(self.tmp_dir.name)
+        self.uuid = "ab501007-dead-beef-1337-422342234223"
+        self.device = Path("/dev/mapper/luks-01234567-89ab-cdef-0123-456789abcdef")
+        self.folder = self.mount_point / "backup/directory"
+        self.target = f"tmp-{self.mount_point.name}"
+        self.repo_suffix = "testing"
         self.patch_findmnt = mock.patch("configure.get_mount_data")
         self.mock_findmnt = self.patch_findmnt.start()
-        self.mock_findmnt.return_value = self.__mock_findmnt_return_value()
+        self.mock_findmnt.side_effect = self.__mock_get_mount_value
 
     @override
     def setUp(self):
@@ -763,6 +803,33 @@ Backup location:
   - Mount target: {self.target}
 """,
         )
+
+    def test_allows_multi_user_access(self):
+        self.folder.mkdir(parents=True, exist_ok=True)
+        # other: ---
+        self.folder.chmod(0o770)
+        self.assertFalse(self.backup_location.allows_multi_user_access())
+        # other: --x
+        self.folder.chmod(0o771)
+        self.assertFalse(self.backup_location.allows_multi_user_access())
+        # other: -w-
+        self.folder.chmod(0o772)
+        self.assertFalse(self.backup_location.allows_multi_user_access())
+        # other: -wx
+        self.folder.chmod(0o773)
+        self.assertFalse(self.backup_location.allows_multi_user_access())
+        # other: r--
+        self.folder.chmod(0o774)
+        self.assertFalse(self.backup_location.allows_multi_user_access())
+        # other: r-x
+        self.folder.chmod(0o775)
+        self.assertFalse(self.backup_location.allows_multi_user_access())
+        # other: rw-
+        self.folder.chmod(0o776)
+        self.assertFalse(self.backup_location.allows_multi_user_access())
+        # other: rwx
+        self.folder.chmod(0o777)
+        self.assertTrue(self.backup_location.allows_multi_user_access())
 
 
 class _TestWithFakeLocationAndFakeUserScope(
