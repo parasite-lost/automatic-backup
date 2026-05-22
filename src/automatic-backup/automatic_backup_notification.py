@@ -63,7 +63,7 @@ class PeriodicExecution:
 
     def __continuous_callback(self):
         while not self.__stop.wait(timeout=self.__interval):
-            self.__callback(self.__call_arg)
+            self.__callback(*self.__call_arg)
 
     def start(self):
         """start periodic execution"""
