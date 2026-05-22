@@ -1,4 +1,4 @@
-FROM fedora:43
+FROM fedora:44
 
 ARG USERNAME=dev
 ARG USER_UID=1000
