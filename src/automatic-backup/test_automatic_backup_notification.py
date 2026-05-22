@@ -107,11 +107,12 @@ class TestNotificationHandler(unittest.TestCase):
 
             time.sleep(0.15)
 
-            notify_calls = (
-                mock.call("Backup", "Backup started", ""),
-                mock.call("Backup", "Backup timeout", "42"),
+            mock_notify_send.assert_has_calls(
+                [
+                    mock.call("starting", "Backup started", "...", ""),
+                    mock.call("stopping", "Backup stopped", "Error: Backup timed out", "42"),
+                ]
             )
-            mock_notify_send.assert_has_calls(notify_calls)
             mock_logging_info.assert_called_once_with("Backup started: %s", 1)
             mock_logging_warning.assert_called_once_with("Backup timeout. Lost: %s", 1)
 
@@ -134,20 +135,23 @@ class TestNotificationHandler(unittest.TestCase):
             notification.start()
             time.sleep(0.05)
 
-            notify_calls = (mock.call("Backup", "Backup started", ""),)
-            mock_notify_send.assert_has_calls(notify_calls)  # not timed out yet
+            mock_notify_send.assert_called_once_with(
+                "starting", "Backup started", "...", ""
+            )  # not timed out yet
             mock_notify_send.reset_mock()
 
             time.sleep(0.15)
 
-            notify_calls = (mock.call("Backup", "Backup timeout", "42"),)
-            mock_notify_send.assert_has_calls(notify_calls)
-            logging_info_calls = (
-                mock.call("Backup started: %s", 1),
-                mock.call("Backup started: %s", 2),
-                mock.call("Backup started: %s", 3),
+            mock_notify_send.assert_called_once_with(
+                "stopping", "Backup stopped", "Error: Backup timed out", "42"
             )
-            mock_logging_info.assert_has_calls(logging_info_calls)
+            mock_logging_info.assert_has_calls(
+                [
+                    mock.call("Backup started: %s", 1),
+                    mock.call("Backup started: %s", 2),
+                    mock.call("Backup started: %s", 3),
+                ]
+            )
 
             mock_logging_warning.assert_called_once_with("Backup timeout. Lost: %s", 3)
 
@@ -169,17 +173,19 @@ class TestNotificationHandler(unittest.TestCase):
 
             time.sleep(0.15)
 
-            notify_calls = (
-                mock.call("Backup", "Backup started", ""),
-                mock.call("Backup", "Backup timeout", "42"),
+            mock_notify_send.assert_has_calls(
+                [
+                    mock.call("starting", "Backup started", "...", ""),
+                    mock.call("stopping", "Backup stopped", "Error: Backup timed out", "42"),
+                ]
             )
-            mock_notify_send.assert_has_calls(notify_calls)
-            logging_info_calls = (
-                mock.call("Backup started: %s", 1),
-                mock.call("Backup started: %s", 2),
-                mock.call("Backup finished. Backups still running: %s", 1),
+            mock_logging_info.assert_has_calls(
+                [
+                    mock.call("Backup started: %s", 1),
+                    mock.call("Backup started: %s", 2),
+                    mock.call("Backup finished. Backups still running: %s", 1),
+                ]
             )
-            mock_logging_info.assert_has_calls(logging_info_calls)
 
             mock_logging_warning.assert_called_once_with("Backup timeout. Lost: %s", 1)
 
@@ -202,18 +208,20 @@ class TestNotificationHandler(unittest.TestCase):
 
             time.sleep(0.15)
 
-            notify_calls = (
-                mock.call("Backup", "Backup started", ""),
-                mock.call("Backup", "Backup finished", "42"),
+            mock_notify_send.assert_has_calls(
+                [
+                    mock.call("starting", "Backup started", "...", ""),
+                    mock.call("stopping", "Backup stopped", "Backup finished successfully", "42"),
+                ]
             )
-            mock_notify_send.assert_has_calls(notify_calls)
-            logging_info_calls = (
-                mock.call("Backup started: %s", 1),
-                mock.call("Backup started: %s", 2),
-                mock.call("Backup finished. Backups still running: %s", 1),
-                mock.call("Backup finished. Backups still running: %s", 0),
+            mock_logging_info.assert_has_calls(
+                [
+                    mock.call("Backup started: %s", 1),
+                    mock.call("Backup started: %s", 2),
+                    mock.call("Backup finished. Backups still running: %s", 1),
+                    mock.call("Backup finished. Backups still running: %s", 0),
+                ]
             )
-            mock_logging_info.assert_has_calls(logging_info_calls)
 
             mock_logging_warning.assert_not_called()
 
@@ -244,18 +252,20 @@ class TestNotificationHandler(unittest.TestCase):
 
             time.sleep(0.15)
 
-            notify_calls = (
-                mock.call("Backup", "Backup started", ""),
-                mock.call("Backup", "Backup finished", "42"),
+            mock_notify_send.assert_has_calls(
+                [
+                    mock.call("starting", "Backup started", "...", ""),
+                    mock.call("stopping", "Backup stopped", "Backup finished successfully", "42"),
+                ]
             )
-            mock_notify_send.assert_has_calls(notify_calls)
-            logging_info_calls = (
-                mock.call("Backup started: %s", 1),
-                mock.call("Backup started: %s", 2),
-                mock.call("Backup finished. Backups still running: %s", 1),
-                mock.call("Backup finished. Backups still running: %s", 0),
+            mock_logging_info.assert_has_calls(
+                [
+                    mock.call("Backup started: %s", 1),
+                    mock.call("Backup started: %s", 2),
+                    mock.call("Backup finished. Backups still running: %s", 1),
+                    mock.call("Backup finished. Backups still running: %s", 0),
+                ]
             )
-            mock_logging_info.assert_has_calls(logging_info_calls)
 
             mock_logging_warning.assert_not_called()
 
@@ -279,21 +289,23 @@ class TestNotificationHandler(unittest.TestCase):
 
             time.sleep(0.1)
 
-            notify_calls = (
-                mock.call("Backup", "Backup started", ""),
-                mock.call("Backup", "Backup running", "42"),
-                mock.call("Backup", "Backup running", "42"),
-                mock.call("Backup", "Backup running", "42"),
-                mock.call("Backup", "Backup finished", "42"),
+            mock_notify_send.assert_has_calls(
+                [
+                    mock.call("starting", "Backup started", "...", ""),
+                    mock.call("running", "Backup running", "...", "42"),
+                    mock.call("running", "Backup running", "...", "42"),
+                    mock.call("running", "Backup running", "...", "42"),
+                    mock.call("stopping", "Backup stopped", "Backup finished successfully", "42"),
+                ]
             )
-            mock_notify_send.assert_has_calls(notify_calls)
-            logging_info_calls = (
-                mock.call("Backup started: %s", 1),
-                mock.call("Backup started: %s", 2),
-                mock.call("Backup finished. Backups still running: %s", 1),
-                mock.call("Backup finished. Backups still running: %s", 0),
+            mock_logging_info.assert_has_calls(
+                [
+                    mock.call("Backup started: %s", 1),
+                    mock.call("Backup started: %s", 2),
+                    mock.call("Backup finished. Backups still running: %s", 1),
+                    mock.call("Backup finished. Backups still running: %s", 0),
+                ]
             )
-            mock_logging_info.assert_has_calls(logging_info_calls)
 
             mock_logging_warning.assert_not_called()
 
@@ -321,25 +333,27 @@ class TestNotificationHandler(unittest.TestCase):
 
             time.sleep(0.1)
 
-            notify_calls = (
-                mock.call("Backup", "Backup started", ""),
-                mock.call("Backup", "Backup running", "42"),
-                mock.call("Backup", "Backup running", "42"),
-                mock.call("Backup", "Backup running", "42"),
-                mock.call("Backup", "Backup finished", "42"),
-                mock.call("Backup", "Backup started", "42"),
-                mock.call("Backup", "Backup running", "42"),
-                mock.call("Backup", "Backup running", "42"),
-                mock.call("Backup", "Backup finished", "42"),
+            mock_notify_send.assert_has_calls(
+                [
+                    mock.call("starting", "Backup started", "...", ""),
+                    mock.call("running", "Backup running", "...", "42"),
+                    mock.call("running", "Backup running", "...", "42"),
+                    mock.call("running", "Backup running", "...", "42"),
+                    mock.call("stopping", "Backup stopped", "Backup finished successfully", "42"),
+                    mock.call("starting", "Backup started", "...", "42"),
+                    mock.call("running", "Backup running", "...", "42"),
+                    mock.call("running", "Backup running", "...", "42"),
+                    mock.call("stopping", "Backup stopped", "Backup finished successfully", "42"),
+                ]
             )
-            mock_notify_send.assert_has_calls(notify_calls)
-            logging_info_calls = (
-                mock.call("Backup started: %s", 1),
-                mock.call("Backup finished. Backups still running: %s", 0),
-                mock.call("Backup started: %s", 1),
-                mock.call("Backup finished. Backups still running: %s", 0),
+            mock_logging_info.assert_has_calls(
+                [
+                    mock.call("Backup started: %s", 1),
+                    mock.call("Backup finished. Backups still running: %s", 0),
+                    mock.call("Backup started: %s", 1),
+                    mock.call("Backup finished. Backups still running: %s", 0),
+                ]
             )
-            mock_logging_info.assert_has_calls(logging_info_calls)
 
             mock_logging_warning.assert_not_called()
 

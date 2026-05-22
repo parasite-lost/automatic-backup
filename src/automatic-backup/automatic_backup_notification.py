@@ -84,21 +84,33 @@ class Status(enum.Enum):
     Stop = 2
 
 
-def notify_send(title: str, message: str, notfication_id: str = "") -> str:
+def notify_send(event: str, title: str, message: str, notification_id: str = "") -> str:
     """Show desktop notification with 'notify-send' utility
 
     Args:
+        event (str): event type of the notification
         title (str): title of the notification
         message (str): body of the notification
-        notification_id (str, optional): id of notification to replace, or "" (default)
+        notification_id (str): desktop notification ID (or "" if none has been sent yet)
 
     Returns:
         str: id of the notification
     """
-    command = ["notify-send", "-p"]
-    if notfication_id:
-        command += ["-r", notfication_id]
-    command += ["-a", title, message]
+    command = [
+        "notify-send",
+        "--icon",
+        "backup",
+        "--print-id",
+        "--app-name",
+        "Automatic Backup",
+        f"--hint=string:x-kde-eventId:{event}",
+        "--expire-time",
+        "0",
+        title,
+        message,
+    ]
+    if notification_id != "":
+        command += ["--replace-id", notification_id]
     result = subprocess.run(
         command,
         check=False,
@@ -123,18 +135,18 @@ class NotificationHandler:
         self.__thread.start()
 
     def __timed_out(self):
-        self.__stop_continuous_notifications("Backup timeout")
+        self.__stop_continuous_notifications("Error: Backup timed out")
         logging.warning("Backup timeout. Lost: %s", self.__count)
         self.__count = 0
 
-    def __notify_send(self, message):
-        self.__notification_id = notify_send("Backup", message, self.__notification_id)
+    def __notify_send(self, event: str, title: str, message: str):
+        self.__notification_id = notify_send(event, title, message, self.__notification_id)
 
     def __start_continuos_notifications(self):
-        self.__notify_send("Backup started")
+        self.__notify_send("starting", "Backup started", "...")
 
         self.__continuous_notification = PeriodicExecution(
-            self.__notification_interval, self.__notify_send, ("Backup running")
+            self.__notification_interval, self.__notify_send, ("running", "Backup running", "...")
         )
         self.__continuous_notification.start()
 
@@ -143,7 +155,7 @@ class NotificationHandler:
             self.__continuous_notification.stop()
         except AttributeError:
             pass
-        self.__notify_send(reason)
+        self.__notify_send("stopping", "Backup stopped", reason)
 
     def __start_backup(self):
         if self.__count == 0:
@@ -166,7 +178,7 @@ class NotificationHandler:
         self.__count = max(0, self.__count - 1)
         if self.__count == 0:
             self.__timer.cancel()
-            self.__stop_continuous_notifications("Backup finished")
+            self.__stop_continuous_notifications("Backup finished successfully")
         logging.info("Backup finished. Backups still running: %s", self.__count)
 
     def __process_status(self, status: Status):
