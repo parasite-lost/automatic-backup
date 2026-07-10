@@ -7,6 +7,7 @@
 
 import os
 import pwd
+import subprocess
 import sys
 import unittest
 from pathlib import Path
@@ -1553,6 +1554,8 @@ class TestBackupServiceSetup(_TestWithFakeLocationAndFakeUserScope):
                             str(config_path),
                         ],
                         check=True,
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.PIPE,
                     ),
                     mock.call(
                         [
@@ -1668,6 +1671,8 @@ class TestBackupServiceSetup(_TestWithFakeLocationAndFakeUserScope):
                             str(config_path),
                         ],
                         check=True,
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.PIPE,
                     ),
                     mock.call(
                         [
@@ -1778,6 +1783,8 @@ class TestBackupServiceSetup(_TestWithFakeLocationAndFakeUserScope):
                             str(config_path),
                         ],
                         check=True,
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.PIPE,
                     ),
                     mock.call(
                         [

@@ -1068,7 +1068,7 @@ class BackupServiceSetup:  # pylint: disable=too-few-public-methods
         if _settings.dry_run:
             return
         try:
-            subprocess.run(command, check=True)
+            subprocess.run(command, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         except subprocess.CalledProcessError as e:
             _os_error(e)
 
